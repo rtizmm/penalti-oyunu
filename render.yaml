@@ -2,6 +2,7 @@ services:
   - type: web
     name: penalti-oyunu
     runtime: node
+    region: frankfurt
     plan: free
     buildCommand: npm install
     startCommand: node server.js

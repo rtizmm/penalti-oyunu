@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Penaltı Oyunu (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5188",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "Sunucuyu başlat"
+    },
+    {
+      "name": "Penaltı Oyunu (Edge)",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://localhost:5188",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "Sunucuyu başlat"
+    },
+    {
+      "name": "Sadece sunucu (Node)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.js",
+      "console": "integratedTerminal"
+    }
+  ]
+}

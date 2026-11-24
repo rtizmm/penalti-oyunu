@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Sunucuyu başlat",
+      "type": "shell",
+      "command": "node",
+      "args": ["server.js"],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "penalti",
+        "pattern": { "regexp": "^__never_match__$" },
+        "background": {
+          "activesBegin": true,
+          "beginsPattern": ".",
+          "endsPattern": "(sunucusu çalışıyor|kullanımda)"
+        }
+      },
+      "presentation": { "reveal": "silent", "panel": "dedicated" },
+      "group": { "kind": "build", "isDefault": true }
+    }
+  ]
+}

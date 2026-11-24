@@ -1,0 +1,13 @@
+{
+  "name": "penalti-oyunu",
+  "version": "1.0.0",
+  "private": true,
+  "description": "3D penaltı oyunu (Three.js, ES modülleri)",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "three": "^0.187.0",
+    "ws": "^8.23.0"
+  }
+}

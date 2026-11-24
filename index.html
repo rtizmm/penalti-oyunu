@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Penaltı Oyunu 3D</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script type="importmap">
+    { "imports": { "three": "/lib/three.module.js" } }
+  </script>
+  <script>
+    window.__showError = function (msg) {
+      var el = document.getElementById('error');
+      if (!el) { console.error(msg); return; }
+      el.classList.remove('hidden');
+      var pre = el.querySelector('pre');
+      pre.textContent += (pre.textContent ? '\n' : '') + msg;
+    };
+    window.addEventListener('error', function (e) {
+      window.__showError((e.message || 'Hata') + (e.filename ? '\n  @ ' + e.filename + ':' + e.lineno : ''));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      window.__showError('Promise hatası: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason));
+    });
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- ============ OYUN İÇİ HUD ============ -->
+  <div id="hud" class="hidden">
+    <!-- Sol üst: Skor tabelası + rüzgar + turnuva/hedef bilgisi -->
+    <div id="topLeft">
+      <div id="scoreboard">
+        <div class="sb-head">
+          <span class="sb-live">● CANLI</span>
+          <span id="sbMode">PENALTI</span>
+          <span id="sbDiff" class="sb-diff">ORTA</span>
+        </div>
+        <div class="sb-row" id="rowUser">
+          <span class="sb-swatch" id="swatchUser" style="--c:#d32f2f"></span>
+          <span class="sb-name">SEN</span>
+          <span class="sb-dots" id="dotsUser"></span>
+          <span class="sb-score" id="scoreUser">0</span>
+        </div>
+        <div class="sb-row" id="rowAi">
+          <span class="sb-swatch" id="swatchAi" style="--c:#1565c0"></span>
+          <span class="sb-name">RAKİP</span>
+          <span class="sb-dots" id="dotsAi"></span>
+          <span class="sb-score" id="scoreAi">0</span>
+        </div>
+        <div class="sb-foot" id="sbFoot">1. PENALTI</div>
+      </div>
+
+      <div id="metaStrip">
+        <div id="windBadge" class="meta-pill" title="Rüzgar yönü ve hızı">
+          <span id="windArrow">→</span> <span id="windText">0 km/s</span>
+        </div>
+        <div id="netHudPing" class="meta-pill hidden" title="Ağ gecikmesi">🌐 <span id="hudPingVal">--</span> ms</div>
+        <div id="speedBadge" class="meta-pill speed hidden">⚡ <span id="speedVal">0</span> km/saat</div>
+      </div>
+
+      <!-- Turnuva aşama çubuğu -->
+      <div id="bracketBar" class="hidden">
+        <span class="br-step" data-stage="0">Çeyrek Final</span>
+        <span class="br-sep">›</span>
+        <span class="br-step" data-stage="1">Yarı Final</span>
+        <span class="br-sep">›</span>
+        <span class="br-step" data-stage="2">FİNAL</span>
+      </div>
+
+      <!-- Hedef Vurma puan & kombo -->
+      <div id="targetHud" class="hidden">
+        <span class="tg-pts">PUAN: <b id="targetScore">0</b></span>
+        <span class="tg-combo" id="targetCombo">KOMBO x1</span>
+      </div>
+    </div>
+
+    <!-- Sağ üst: kamera + ses + spiker + duraklat -->
+    <div id="topRight">
+      <div id="camButtons" class="cam-buttons"></div>
+      <div class="tr-actions">
+        <button id="btnAnnouncer" class="icon-btn" title="Spiker aç/kapat">🎙️</button>
+        <button id="btnMute" class="icon-btn" title="Sesi aç/kapat (M)">🔊</button>
+        <button id="btnPause" class="icon-btn" title="Duraklat (Esc)">⏸</button>
+      </div>
+    </div>
+
+    <div id="turnInfo"></div>
+    <div id="onlineTimerBar" class="hidden">
+      <div class="ot-head"><span id="onlineStatusText">Seçimini yap</span><span id="onlineTimerSec">15s</span></div>
+      <div class="ot-track"><div class="ot-fill" id="onlineTimerFill"></div></div>
+    </div>
+    <div id="hint"></div>
+    <div id="slowmo" class="hidden">AĞIR ÇEKİM</div>
+    <div id="toast" class="hidden"></div>
+    <div id="emoteFloat" class="hidden"></div>
+
+    <!-- Online hızlı emote çubuğu -->
+    <div id="emoteBar" class="hidden">
+      <button class="em-btn" data-emoji="👏" title="Alkış">👏</button>
+      <button class="em-btn" data-emoji="🔥" title="Alev">🔥</button>
+      <button class="em-btn" data-emoji="😱" title="Şok">😱</button>
+      <button class="em-btn" data-emoji="😂" title="Kahkaha">😂</button>
+      <button class="em-btn" data-emoji="GG" title="İyi oyun">GG</button>
+    </div>
+
+    <!-- Tekrar (Instant Replay) kaplaması -->
+    <div id="replayHud" class="hidden">
+      <div class="rp-badge">● TEKRAR</div>
+      <button id="btnSkipReplay" class="rp-skip">GEÇ [Boşluk]</button>
+    </div>
+
+    <!-- Şut tipi seçici (penaltıcıyken) -->
+    <div id="shotBar" class="hidden"></div>
+
+    <!-- Zamanlı vuruş (Timed Finishing) çubuğu -->
+    <div id="timedBar" class="hidden">
+      <div class="tb-title">ZAMANLI VURUŞ — <kbd>Boşluk</kbd> / Tık</div>
+      <div class="tb-track">
+        <div class="tb-sweet"></div>
+        <div class="tb-cursor" id="timedCursor"></div>
+      </div>
+      <div class="tb-sub">Şaşırtma: <kbd>Shift</kbd> veya <kbd>Sağ Tık</kbd></div>
+    </div>
+
+    <!-- Nişangah -->
+    <div id="reticle" class="hidden"><div class="ret-ring"></div><div class="ret-dot"></div></div>
+
+    <!-- Güç göstergesi -->
+    <div id="power" class="hidden">
+      <div class="pw-label">GÜÇ</div>
+      <div class="pw-bar">
+        <div class="pw-zone"></div>
+        <div class="pw-danger"></div>
+        <div class="pw-fill" id="pwFill"></div>
+        <div class="pw-marker" id="pwMarker"></div>
+      </div>
+      <div class="pw-curl" id="pwCurl">FALSO: YOK</div>
+    </div>
+
+    <!-- Kaleci tuşları -->
+    <div id="keeperPad" class="hidden">
+      <div class="kp-title" id="keeperPadTitle">KALECİ — yönünü seç <small>(kalecinin bakış açısından)</small></div>
+      <div class="kp-grid">
+        <button class="kp-btn" data-sx="-1" data-h="high"></button>
+        <button class="kp-btn" data-sx="0" data-h="high"></button>
+        <button class="kp-btn" data-sx="1" data-h="high"></button>
+        <button class="kp-btn" data-sx="-1" data-h="low"></button>
+        <button class="kp-btn" data-sx="0" data-h="low"></button>
+        <button class="kp-btn" data-sx="1" data-h="low"></button>
+      </div>
+    </div>
+
+    <!-- Sonuç pankartı -->
+    <div id="banner" class="hidden">
+      <div class="bn-text" id="bannerText">GOL!</div>
+      <div class="bn-sub" id="bannerSub"></div>
+    </div>
+  </div>
+
+  <!-- ============ ANA MENÜ ============ -->
+  <div id="menu" class="overlay">
+    <div class="menu-card">
+      <div class="menu-top">
+        <div class="brand">
+          <div class="brand-ball">⚽</div>
+          <div>
+            <h1>PENALTI <span class="v2-tag">V2</span></h1>
+            <div class="brand-sub">3D Stadyum Penaltı Atışları</div>
+          </div>
+        </div>
+        <div class="menu-top-actions">
+          <button id="btnStats" class="pill-btn">📊 İstatistikler</button>
+          <button id="btnMenuAnnouncer" class="pill-btn">🎙️ Spiker: Açık</button>
+        </div>
+      </div>
+
+      <div class="menu-section">
+        <div class="menu-label">OYUN MODU</div>
+        <div class="mode-grid" id="modeGrid">
+          <button class="mode-card" data-mode="shooter">
+            <span class="mc-icon">🎯</span><span class="mc-title">Penaltıcı Ol</span>
+            <span class="mc-desc">5 penaltı at, YZ kaleciyi geç.</span>
+          </button>
+          <button class="mode-card" data-mode="keeper">
+            <span class="mc-icon">🧤</span><span class="mc-title">Kaleci Ol</span>
+            <span class="mc-desc">Kaleye geç, 5 şutu kurtar.</span>
+          </button>
+          <button class="mode-card" data-mode="series">
+            <span class="mc-icon">⚔️</span><span class="mc-title">Seri Penaltı</span>
+            <span class="mc-desc">5'er atış + ani ölüm.</span>
+          </button>
+          <button class="mode-card" data-mode="local2p">
+            <span class="mc-icon">👥</span><span class="mc-title">2 Kişilik Lokal</span>
+            <span class="mc-desc">P1 şut vs P2 kaleci (J/K/L+I).</span>
+          </button>
+          <button class="mode-card" data-mode="tournament">
+            <span class="mc-icon">🏆</span><span class="mc-title">Turnuva / Kupa</span>
+            <span class="mc-desc">Çeyrek Final → Yarı → Final!</span>
+          </button>
+          <button class="mode-card" data-mode="targets">
+            <span class="mc-icon">🎪</span><span class="mc-title">Hedef Vurma</span>
+            <span class="mc-desc">10 atış, 90'a asma & kombo!</span>
+          </button>
+          <button class="mode-card online-card" data-mode="online">
+            <span class="mc-icon">🌐</span>
+            <div class="online-card-body">
+              <span class="mc-title">Online 1v1 (Oda Kodu) <span class="live-pill">● CANLI</span></span>
+              <span class="mc-desc">Oda kur, davet linkini arkadaşına gönder ve gerçek zamanlı penaltı düellosu yap!</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <div class="menu-two-col">
+        <div class="menu-section compact">
+          <div class="menu-label">ZORLUK</div>
+          <div class="seg" id="diffSeg">
+            <button data-diff="easy">Kolay</button>
+            <button data-diff="medium">Orta</button>
+            <button data-diff="hard">Zor</button>
+          </div>
+          <div class="menu-note" id="diffNote"></div>
+        </div>
+
+        <div class="menu-section compact">
+          <div class="menu-label">STADYUM & HAVA</div>
+          <div class="env-row">
+            <div class="seg mini" id="timeSeg">
+              <button data-time="day">☀️ Gündüz</button>
+              <button data-time="sunset">🌅 Batım</button>
+              <button data-time="night">🌙 Gece</button>
+            </div>
+            <div class="seg mini" id="weatherSeg">
+              <button data-weather="clear">Açık</button>
+              <button data-weather="rain">🌧️ Yağmur</button>
+              <button data-weather="snow">❄️ Kar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="menu-two-col">
+        <div class="menu-section compact">
+          <div class="menu-label">FORMA & NUMARA</div>
+          <div class="kit-row">
+            <div class="swatches" id="teamSwatches"></div>
+            <label class="num-wrap">#<input id="jerseyInput" type="number" min="1" max="99" value="10" /></label>
+          </div>
+        </div>
+
+        <div class="menu-section compact">
+          <div class="menu-label">TOP TASARIMI</div>
+          <div class="chips" id="ballSkinChips"></div>
+        </div>
+      </div>
+
+      <div class="menu-section compact">
+        <div class="menu-label">KAMERA</div>
+        <div class="chips" id="camChips"></div>
+      </div>
+
+      <button id="btnStart" class="primary">BAŞLA ▶</button>
+
+      <details class="controls">
+        <summary>Kontroller & Yeni Mekanikler</summary>
+        <div class="controls-grid">
+          <div>
+            <b>Penaltıcı</b>
+            <ul>
+              <li><kbd>Fare</kbd> / <kbd>Oklar</kbd>: nişan · <kbd>Sol Tık</kbd>/<kbd>Boşluk</kbd>: güç</li>
+              <li><kbd>1</kbd> Normal · <kbd>2</kbd> Plase · <kbd>3</kbd> Panenka · <kbd>4</kbd> Trivela</li>
+              <li><kbd>Q</kbd>/<kbd>E</kbd>: falso · Koşarken <kbd>Shift</kbd>/<kbd>Sağ Tık</kbd>: şaşırtma</li>
+              <li>Koşarken yeşil bölgede <kbd>Boşluk</kbd>: <b>Zamanlı Vuruş!</b></li>
+            </ul>
+          </div>
+          <div>
+            <b>Kaleci & 2 Kişilik</b>
+            <ul>
+              <li>Tek kişilik: <kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd> veya oklar (+ <kbd>W</kbd>/<kbd>↑</kbd> yüksek)</li>
+              <li>2 Kişilik P2 Kaleci: <kbd>J</kbd> sol · <kbd>K</kbd> orta · <kbd>L</kbd> sağ (+ <kbd>I</kbd> yüksek)</li>
+              <li>P1 nişan kilitlenince nişangah gizlenir!</li>
+            </ul>
+          </div>
+          <div>
+            <b>Genel</b>
+            <ul>
+              <li><kbd>C</kbd>: 8 kamera açısı · <kbd>M</kbd>: ses · <kbd>Esc</kbd>: duraklat</li>
+              <li>Gol/kurtarışta otomatik ağır çekim tekrar (<kbd>Boşluk</kbd> ile geç)</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- ============ ONLINE 1v1 LOBİ ============ -->
+  <div id="onlineLobby" class="overlay hidden">
+    <div class="menu-card small lobby-card">
+      <div class="lobby-head">
+        <h2>🌐 ONLINE 1v1</h2>
+        <div class="net-status-pill" id="netStatus">Bağlanıyor…</div>
+      </div>
+      <div class="lobby-stats">
+        <span>👤 <b id="netOnlineCount">0</b> çevrimiçi</span>
+        <span>🏟️ <b id="netRoomCount">0</b> oda</span>
+        <span>📶 <b id="netPing">--</b> ms</span>
+      </div>
+
+      <label class="lobby-field">
+        <span>OYUNCU ADIN</span>
+        <input id="netNameInput" type="text" maxlength="14" placeholder="Oyuncu" />
+      </label>
+
+      <div id="lobbyMain">
+        <button id="btnCreateRoom" class="primary">🏟️ ODA KUR</button>
+        <div class="lobby-divider"><span>VEYA ODAYA KATIL</span></div>
+        <div class="join-row">
+          <input id="joinCodeInput" type="text" maxlength="4" placeholder="K7M4" autocomplete="off" />
+          <button id="btnJoinRoom" class="primary join-btn">KATIL</button>
+        </div>
+      </div>
+
+      <div id="lobbyWaiting" class="hidden">
+        <div class="wait-label">ODA KODUN</div>
+        <div id="roomCodeDisplay" class="room-code">----</div>
+        <button id="btnCopyInvite" class="secondary copy-btn">📋 DAVET LİNKİNİ KOPYALA</button>
+        <div class="wait-pulse">⏳ Rakip bekleniyor…</div>
+        <button id="btnCancelRoom" class="secondary danger">ODAYI İPTAL ET</button>
+      </div>
+
+      <div id="lobbyError" class="lobby-error hidden"></div>
+      <button id="btnCloseLobby" class="secondary">ANA MENÜYE DÖN</button>
+    </div>
+  </div>
+
+  <!-- ============ İSTATİSTİKLER & REKORLAR ============ -->
+  <div id="statsModal" class="overlay hidden">
+    <div class="menu-card small stats-card">
+      <h2>📊 İSTATİSTİKLER</h2>
+      <div class="stats-grid" id="statsGrid"></div>
+      <div class="stats-actions">
+        <button id="btnResetStats" class="secondary danger">SIFIRLA</button>
+        <button id="btnCloseStats" class="primary">KAPAT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DURAKLATMA ============ -->
+  <div id="pause" class="overlay hidden">
+    <div class="menu-card small">
+      <h2>DURAKLATILDI</h2>
+      <button id="btnResume" class="primary">DEVAM ET</button>
+      <button id="btnRestart" class="secondary">YENİDEN BAŞLAT</button>
+      <button id="btnMenu" class="secondary">ANA MENÜ</button>
+    </div>
+  </div>
+
+  <!-- ============ OYUN SONU / KUPA ============ -->
+  <div id="end" class="overlay hidden">
+    <div class="menu-card small">
+      <div class="end-icon" id="endIcon">🏆</div>
+      <h2 id="endTitle">KAZANDIN!</h2>
+      <div class="end-score" id="endScore">4 - 3</div>
+      <div class="end-detail" id="endDetail"></div>
+      <button id="btnNextStage" class="primary hidden">SONRAKİ TUR ▶</button>
+      <button id="btnRematch" class="primary hidden">🔄 RÖVANŞ İSTE</button>
+      <button id="btnAgain" class="primary">TEKRAR OYNA</button>
+      <button id="btnLeaveOnline" class="secondary hidden">ODADAN ÇIK</button>
+      <button id="btnEndMenu" class="secondary">ANA MENÜ</button>
+    </div>
+  </div>
+
+  <!-- ============ HATA ============ -->
+  <div id="error" class="overlay hidden">
+    <div class="menu-card small">
+      <h2>Bir hata oluştu</h2>
+      <pre></pre>
+      <p class="menu-note">Sunucuyu <code>node server.js</code> ile başlatıp <code>http://localhost:5188</code> adresini açtığından emin ol.</p>
+    </div>
+  </div>
+
+  <div id="loading" class="overlay"><div class="loader"><div class="brand-ball spin">⚽</div><div>Stadyum hazırlanıyor…</div></div></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

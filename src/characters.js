@@ -55,8 +55,32 @@ function lightenHex(color, factor = 0.24) {
 }
 
 /**
- * Generates a crisp 512×512 canvas texture for a jersey face (front or back)
- * with athletic stripes/sash accents, collar trim, club crest, and sharp number.
+ * Creates a UV-preserving tapered athletic box (broader at top shoulders, tapered at waist)
+ * with subtle chest fullness so the 6-face jersey textures map cleanly without distortion.
+ */
+function createTaperedTorsoGeometry(wTop, wBot, h, dTop, dBot) {
+  const geo = new THREE.BoxGeometry(1, h, 1, 2, 4, 2);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const t = clamp((y + h * 0.5) / h, 0, 1); // 0 = waist, 1 = shoulders
+    // Smooth V-taper + subtle athletic chest/pectoral curve around t = 0.68
+    const chestCurve = Math.sin(t * Math.PI) * 0.022;
+    const w = lerp(wBot, wTop, Math.pow(t, 0.82)) + chestCurve;
+    const d = lerp(dBot, dTop, Math.pow(t, 0.75)) + chestCurve * 1.1;
+    // Slight rounding on outer corners
+    const cornerRound = Math.abs(x) > 0.45 && Math.abs(z) > 0.45 ? 0.94 : 1.0;
+    pos.setXYZ(i, x * w * cornerRound, y, z * d * cornerRound);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Generates a rich 512×512 canvas texture for a jersey face (front or back)
+ * with subtle woven fabric micro-grain, stripes/sash, ribbed V-collar, badge, and sharp number.
  */
 function createJerseyTexture({ baseColor, accentColor, number, isBack, isKeeper }) {
   const w = 512;
@@ -67,7 +91,8 @@ function createJerseyTexture({ baseColor, accentColor, number, isBack, isKeeper 
   const ctx = canvas.getContext('2d');
 
   const mainHex = colorToHexString(baseColor);
-  const darkHex = darkenHex(baseColor, 0.76);
+  const darkHex = darkenHex(baseColor, 0.74);
+  const deepHex = darkenHex(baseColor, 0.58);
   const lightHex = lightenHex(baseColor, 0.22);
   const accHex = colorToHexString(accentColor);
 
@@ -76,136 +101,194 @@ function createJerseyTexture({ baseColor, accentColor, number, isBack, isKeeper 
   ctx.fillRect(0, 0, w, h);
 
   if (isKeeper) {
-    // Bold geometric goalkeeper chevron/diagonal pattern
+    // Dynamic goalkeeper geometric chevron/diagonal graphics
     ctx.fillStyle = darkHex;
     for (let i = -2; i < 6; i++) {
       ctx.beginPath();
-      ctx.moveTo(i * 128, 0);
-      ctx.lineTo(i * 128 + 66, 0);
-      ctx.lineTo(i * 128 - 90, h);
-      ctx.lineTo(i * 128 - 156, h);
+      ctx.moveTo(i * 124, 0);
+      ctx.lineTo(i * 124 + 62, 0);
+      ctx.lineTo(i * 124 - 92, h);
+      ctx.lineTo(i * 124 - 154, h);
       ctx.closePath();
       ctx.fill();
     }
+    // Subtle secondary diagonal pinstripes
+    ctx.strokeStyle = accHex;
+    ctx.globalAlpha = 0.25;
+    ctx.lineWidth = 4;
+    for (let i = -1; i < 6; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * 124 + 74, 0);
+      ctx.lineTo(i * 124 - 80, h);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
     // High-vis shoulder panels
     ctx.fillStyle = accHex;
-    ctx.fillRect(0, 0, w, 52);
-    ctx.fillStyle = 'rgba(255,255,255,0.22)';
-    ctx.fillRect(0, 52, w, 10);
+    ctx.fillRect(0, 0, w, 48);
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fillRect(0, 48, w, 8);
   } else {
-    // Crisp vertical athletic stripes + subtle diagonal sash sheen
+    // Crisp vertical athletic stripes + tonal pinstripes
     ctx.fillStyle = darkHex;
     const stripeW = 64;
     for (let x = 0; x < w; x += stripeW * 2) {
       ctx.fillRect(x, 0, stripeW, h);
     }
-    // Subtle diagonal sash accent
+    ctx.fillStyle = deepHex;
+    ctx.globalAlpha = 0.28;
+    for (let x = 0; x < w; x += stripeW) {
+      ctx.fillRect(x, 0, 3, h);
+    }
+    ctx.globalAlpha = 1;
+
+    // Clean diagonal sash accent
     ctx.save();
-    ctx.globalAlpha = 0.22;
+    ctx.globalAlpha = 0.20;
     ctx.fillStyle = accHex;
     ctx.beginPath();
-    ctx.moveTo(w * 0.65, 0);
-    ctx.lineTo(w * 0.92, 0);
+    ctx.moveTo(w * 0.66, 0);
+    ctx.lineTo(w * 0.90, 0);
     ctx.lineTo(w * 0.28, h);
-    ctx.lineTo(w * 0.02, h);
+    ctx.lineTo(w * 0.04, h);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
-
-    // Soft fabric shading gradient
-    const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, 'rgba(255,255,255,0.16)');
-    grad.addColorStop(0.55, 'rgba(255,255,255,0.0)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.20)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
   }
 
-  // Side accent panels
-  ctx.fillStyle = accHex;
-  ctx.fillRect(0, 0, 22, h);
-  ctx.fillRect(w - 22, 0, 22, h);
+  // Subtle woven athletic mesh fabric micro-grain
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.045)';
+  for (let y = 0; y < h; y += 8) {
+    ctx.fillRect(0, y, w, 2);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  for (let x = 0; x < w; x += 8) {
+    ctx.fillRect(x, 0, 2, h);
+  }
+  ctx.restore();
 
-  // Hem accent bar
+  // Soft athletic torso lighting gradient + side seam shading
+  const vGrad = ctx.createLinearGradient(0, 0, 0, h);
+  vGrad.addColorStop(0, 'rgba(255,255,255,0.16)');
+  vGrad.addColorStop(0.45, 'rgba(255,255,255,0.02)');
+  vGrad.addColorStop(1, 'rgba(0,0,0,0.22)');
+  ctx.fillStyle = vGrad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Side accent mesh panels + piping
+  ctx.fillStyle = accHex;
+  ctx.fillRect(0, 0, 20, h);
+  ctx.fillRect(w - 20, 0, 20, h);
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(20, 0, 4, h);
+  ctx.fillRect(w - 24, 0, 4, h);
+
+  // Hem trim bar
   ctx.fillStyle = accHex;
   ctx.fillRect(0, h - 18, w, 18);
 
-  // Collar V-neck trim
+  // Ribbed V-neck collar trim
   ctx.fillStyle = accHex;
   ctx.beginPath();
-  ctx.moveTo(w * 0.33, 0);
-  ctx.lineTo(w * 0.5, isBack ? 38 : 74);
-  ctx.lineTo(w * 0.67, 0);
+  ctx.moveTo(w * 0.32, 0);
+  ctx.lineTo(w * 0.5, isBack ? 40 : 78);
+  ctx.lineTo(w * 0.68, 0);
   ctx.closePath();
   ctx.fill();
-
-  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.34)';
   ctx.lineWidth = 4;
   ctx.stroke();
 
-  if (isBack) {
-    // Sharp athletic nameplate bar above number
-    ctx.fillStyle = 'rgba(255,255,255,0.88)';
-    ctx.fillRect(w * 0.27, h * 0.145, w * 0.46, 26);
+  // Inner collar accent stitch
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(w * 0.36, 4);
+  ctx.lineTo(w * 0.5, isBack ? 32 : 64);
+  ctx.lineTo(w * 0.64, 4);
+  ctx.stroke();
 
-    // Large crisp jersey number on back
+  if (isBack) {
+    // Clean nameplate bar above number
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillRect(w * 0.27, h * 0.14, w * 0.46, 24);
+    ctx.fillStyle = accHex;
+    ctx.fillRect(w * 0.27, h * 0.14 + 24, w * 0.46, 5);
+
+    // Large crisp outlined jersey number on back
     const numStr = String(number ?? 10);
-    ctx.font = numStr.length > 2 ? '900 185px "Segoe UI", Arial, sans-serif' : '900 248px "Segoe UI", Arial, sans-serif';
+    ctx.font = numStr.length > 2 ? '900 186px "Segoe UI", Arial, sans-serif' : '900 252px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
-    ctx.lineWidth = 20;
-    ctx.strokeStyle = 'rgba(10, 14, 24, 0.78)';
+    ctx.lineWidth = 22;
+    ctx.strokeStyle = 'rgba(10, 14, 24, 0.82)';
     ctx.strokeText(numStr, w * 0.5, h * 0.56);
     ctx.fillStyle = '#ffffff';
     ctx.fillText(numStr, w * 0.5, h * 0.56);
 
-    // Inner subtle highlight line
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3.5;
     ctx.strokeStyle = accHex;
     ctx.strokeText(numStr, w * 0.5, h * 0.56);
   } else {
-    // Front: club crest shield on left chest
+    // Front: embroidered club crest shield on left chest
     ctx.save();
     ctx.translate(w * 0.69, h * 0.28);
     ctx.fillStyle = accHex;
     ctx.beginPath();
-    ctx.moveTo(0, -36);
-    ctx.lineTo(30, -24);
-    ctx.lineTo(26, 16);
-    ctx.lineTo(0, 40);
-    ctx.lineTo(-26, 16);
-    ctx.lineTo(-30, -24);
+    ctx.moveTo(0, -38);
+    ctx.lineTo(32, -25);
+    ctx.lineTo(27, 17);
+    ctx.lineTo(0, 42);
+    ctx.lineTo(-27, 17);
+    ctx.lineTo(-32, -25);
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 5;
     ctx.stroke();
-    // Star inside crest
-    ctx.fillStyle = '#ffffff';
+    // Inner shield stripe & gold star
+    ctx.fillStyle = darkHex;
     ctx.beginPath();
-    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.moveTo(0, -24);
+    ctx.lineTo(18, -14);
+    ctx.lineTo(15, 10);
+    ctx.lineTo(0, 26);
+    ctx.lineTo(-15, 10);
+    ctx.lineTo(-18, -14);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#ffd54f';
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
-    // Small chest number on right chest
-    ctx.font = '900 68px "Segoe UI", Arial, sans-serif';
+    // Crisp chest number on right chest
+    ctx.font = '900 66px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = 'rgba(10,14,24,0.6)';
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = 'rgba(10,14,24,0.65)';
     ctx.strokeText(String(number ?? 10), w * 0.30, h * 0.29);
     ctx.fillStyle = '#ffffff';
     ctx.fillText(String(number ?? 10), w * 0.30, h * 0.29);
 
     // Sleek chest sponsor band
     ctx.fillStyle = lightHex;
-    ctx.globalAlpha = 0.26;
-    ctx.fillRect(36, h * 0.50, w - 72, 46);
-    ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = 0.25;
+    ctx.fillRect(38, h * 0.50, w - 76, 46);
+    ctx.globalAlpha = 0.90;
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(w * 0.26, h * 0.535, w * 0.48, 12);
+    ctx.fillRect(w * 0.25, h * 0.532, w * 0.50, 11);
+    ctx.fillStyle = accHex;
+    ctx.fillRect(w * 0.33, h * 0.562, w * 0.34, 5);
     ctx.globalAlpha = 1;
+
+    // Authentic jock-tag near bottom right hem
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillRect(w * 0.72, h - 42, 44, 14);
   }
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -214,7 +297,7 @@ function createJerseyTexture({ baseColor, accentColor, number, isBack, isKeeper 
   return tex;
 }
 
-// ============ HUMANOID RIG BUILDER (V2) ============
+// ============ HUMANOID RIG BUILDER (V4) ============
 function enableShadows(obj) {
   obj.traverse((child) => {
     if (child.isMesh) {
@@ -224,8 +307,21 @@ function enableShadows(obj) {
   });
 }
 
+// Shared small detail geometries for lean draw calls & zero redundant allocations
+const SHARED_GEO = {
+  ear: new THREE.SphereGeometry(0.026, 8, 6),
+  eye: new THREE.SphereGeometry(0.0185, 10, 8),
+  iris: new THREE.SphereGeometry(0.0115, 8, 6),
+  pupil: new THREE.SphereGeometry(0.007, 6, 6),
+  catchlight: new THREE.SphereGeometry(0.0032, 6, 6),
+  brow: new THREE.BoxGeometry(0.040, 0.011, 0.014),
+  lace: new THREE.BoxGeometry(0.058, 0.007, 0.014),
+  stud: new THREE.CylinderGeometry(0.0075, 0.0045, 0.016, 6),
+  fingerRidge: new THREE.BoxGeometry(0.018, 0.056, 0.014),
+};
+
 /**
- * Builds an upgraded stylized low-poly footballer rig facing +Z in local space.
+ * Builds a polished athletic footballer rig facing +Z in local space.
  * Origin of `group` is at the soles of the feet (y = 0).
  * Supports live `applyKit(...)` material & texture updates without recreating meshes.
  */
@@ -257,7 +353,7 @@ function buildHumanoidRig({
   // Materials
   const jerseyMat = new THREE.MeshStandardMaterial({
     color: jerseyColor,
-    roughness: 0.58,
+    roughness: 0.56,
     metalness: 0.06,
   });
   let frontTex = createJerseyTexture({
@@ -276,22 +372,22 @@ function buildHumanoidRig({
   });
   const frontJerseyMat = new THREE.MeshStandardMaterial({
     map: frontTex,
-    roughness: 0.55,
+    roughness: 0.52,
     metalness: 0.05,
   });
   const backJerseyMat = new THREE.MeshStandardMaterial({
     map: backTex,
-    roughness: 0.55,
+    roughness: 0.52,
     metalness: 0.05,
   });
   const accentMat = new THREE.MeshStandardMaterial({
     color: accentColor,
-    roughness: 0.45,
+    roughness: 0.44,
     metalness: 0.08,
   });
   const shortsMat = new THREE.MeshStandardMaterial({
     color: shortsColor,
-    roughness: 0.68,
+    roughness: 0.66,
     metalness: 0.04,
   });
   const sockMat = new THREE.MeshStandardMaterial({
@@ -300,54 +396,67 @@ function buildHumanoidRig({
   });
   const sockBandMat = new THREE.MeshStandardMaterial({
     color: accentColor,
-    roughness: 0.65,
+    roughness: 0.62,
   });
   const skinMat = new THREE.MeshStandardMaterial({
     color: skinColor,
-    roughness: 0.56,
+    roughness: 0.54,
     metalness: 0.02,
   });
   const hairMat = new THREE.MeshStandardMaterial({
     color: hairColor,
-    roughness: 0.78,
+    roughness: 0.72,
+    metalness: 0.04,
   });
-  // Specular football boots
+  // Specular football boots + laces + metallic studs
   const bootMat = new THREE.MeshStandardMaterial({
     color: bootColor,
-    roughness: 0.26,
-    metalness: 0.28,
+    roughness: 0.24,
+    metalness: 0.30,
   });
   const bootAccentMat = new THREE.MeshStandardMaterial({
     color: bootAccent,
-    roughness: 0.22,
-    metalness: 0.35,
+    roughness: 0.20,
+    metalness: 0.36,
   });
   const soleMat = new THREE.MeshStandardMaterial({
-    color: 0x0e1118,
-    roughness: 0.5,
-    metalness: 0.15,
+    color: 0x0d1017,
+    roughness: 0.45,
+    metalness: 0.18,
   });
-  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8f9fa, roughness: 0.22 });
-  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x121620, roughness: 0.15, metalness: 0.1 });
+  const studMat = new THREE.MeshStandardMaterial({
+    color: 0xd8e0ec,
+    roughness: 0.22,
+    metalness: 0.72,
+  });
+  const tapeMat = new THREE.MeshStandardMaterial({
+    color: 0xf4f7fb,
+    roughness: 0.65,
+  });
+  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8f9fa, roughness: 0.18 });
+  const irisMat = new THREE.MeshStandardMaterial({ color: isKeeper ? 0x2d6a4f : 0x4a3322, roughness: 0.22 });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x10131a, roughness: 0.12, metalness: 0.1 });
+  const catchlightMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const mouthMat = new THREE.MeshStandardMaterial({ color: 0xb67b63, roughness: 0.65 });
   const captainBandMat = new THREE.MeshStandardMaterial({
     color: 0xffd600,
-    roughness: 0.38,
-    metalness: 0.12,
+    roughness: 0.36,
+    metalness: 0.14,
   });
-  // Detailed specular keeper gloves
+  // Detailed specular keeper gloves with distinct high-contrast grip palm
   const gloveMat = new THREE.MeshStandardMaterial({
     color: gloveColor,
-    roughness: 0.32,
-    metalness: 0.1,
+    roughness: 0.30,
+    metalness: 0.10,
   });
   const glovePalmMat = new THREE.MeshStandardMaterial({
-    color: 0xf5f8fc,
-    roughness: 0.45,
+    color: 0xeafff2,
+    roughness: 0.42,
+    metalness: 0.03,
   });
   const gloveStrapMat = new THREE.MeshStandardMaterial({
-    color: 0x151922,
-    roughness: 0.5,
+    color: 0x141821,
+    roughness: 0.48,
   });
 
   function applyKit({ primary, color, secondary, shorts, number: num, gloveColor: gc } = {}) {
@@ -408,7 +517,7 @@ function buildHumanoidRig({
   group.add(hips);
 
   const pelvisMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(0.35, 0.17, 0.22),
+    new THREE.BoxGeometry(0.34, 0.17, 0.215),
     shortsMat
   );
   pelvisMesh.position.set(0, -0.02, 0);
@@ -416,13 +525,13 @@ function buildHumanoidRig({
 
   // Waistband accent
   const waistBand = new THREE.Mesh(
-    new THREE.BoxGeometry(0.36, 0.032, 0.23),
+    new THREE.BoxGeometry(0.35, 0.030, 0.222),
     accentMat
   );
-  waistBand.position.set(0, 0.055, 0);
+  waistBand.position.set(0, 0.056, 0);
   hips.add(waistBand);
 
-  // ---- TORSO (pivots at waist y = 0.06 above hips) ----
+  // ---- TORSO (athletic V-taper pivoting at waist y = 0.06 above hips) ----
   const torso = new THREE.Group();
   torso.position.set(0, 0.06, 0);
   hips.add(torso);
@@ -436,37 +545,37 @@ function buildHumanoidRig({
     backJerseyMat,
   ];
   const chestMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(0.41, 0.49, 0.235),
+    createTaperedTorsoGeometry(0.44, 0.34, 0.49, 0.245, 0.195),
     chestMaterials
   );
   chestMesh.position.set(0, 0.245, 0);
   torso.add(chestMesh);
 
-  // Athletic rounded shoulder yoke
+  // Athletic rounded shoulder yoke & deltoid caps
   const shoulderBar = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.098, 0.31, 6, 12),
+    new THREE.CapsuleGeometry(0.095, 0.32, 6, 12),
     jerseyMat
   );
   shoulderBar.rotation.z = Math.PI / 2;
   shoulderBar.position.set(0, 0.435, 0);
   torso.add(shoulderBar);
 
-  // Collar ring
+  // Ribbed collar ring
   const collar = new THREE.Mesh(
-    new THREE.TorusGeometry(0.072, 0.018, 6, 14),
+    new THREE.TorusGeometry(0.072, 0.019, 8, 16),
     accentMat
   );
   collar.rotation.x = Math.PI / 2;
   collar.position.set(0, 0.495, 0.01);
   torso.add(collar);
 
-  // ---- NECK & HEAD ----
+  // ---- NECK & SCULPTED HEAD ----
   const neck = new THREE.Group();
   neck.position.set(0, 0.50, 0);
   torso.add(neck);
 
   const neckMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.056, 0.068, 0.095, 10),
+    new THREE.CylinderGeometry(0.055, 0.068, 0.095, 12),
     skinMat
   );
   neckMesh.position.set(0, 0.042, 0);
@@ -477,98 +586,119 @@ function buildHumanoidRig({
   neck.add(head);
 
   const cranium = new THREE.Mesh(
-    new THREE.SphereGeometry(0.126, 16, 12),
+    new THREE.SphereGeometry(0.126, 20, 16),
     skinMat
   );
   cranium.scale.set(0.92, 1.07, 0.98);
-  cranium.position.set(0, 0.112, 0);
+  cranium.position.set(0, 0.114, 0);
   head.add(cranium);
 
-  // Subtle sculpted jawline/chin
+  // Sculpted jawline + rounded chin
   const jaw = new THREE.Mesh(
-    new THREE.BoxGeometry(0.11, 0.05, 0.10),
+    new THREE.CylinderGeometry(0.078, 0.054, 0.062, 10),
     skinMat
   );
-  jaw.position.set(0, 0.032, 0.045);
+  jaw.scale.set(1.02, 1.0, 0.92);
+  jaw.position.set(0, 0.036, 0.036);
   head.add(jaw);
 
   // Ears
-  const earGeo = new THREE.SphereGeometry(0.026, 8, 6);
-  const leftEar = new THREE.Mesh(earGeo, skinMat);
-  leftEar.scale.set(0.6, 1.15, 0.85);
-  leftEar.position.set(0.116, 0.106, -0.01);
+  const leftEar = new THREE.Mesh(SHARED_GEO.ear, skinMat);
+  leftEar.scale.set(0.58, 1.18, 0.82);
+  leftEar.position.set(0.115, 0.108, -0.01);
   head.add(leftEar);
   const rightEar = leftEar.clone();
-  rightEar.position.x = -0.116;
+  rightEar.position.x = -0.115;
   head.add(rightEar);
 
-  // Nose
+  // Sculpted nose bridge
   const nose = new THREE.Mesh(
-    new THREE.BoxGeometry(0.022, 0.038, 0.034),
+    new THREE.BoxGeometry(0.022, 0.040, 0.036),
     skinMat
   );
   nose.position.set(0, 0.098, 0.123);
-  nose.rotation.x = -0.15;
+  nose.rotation.x = -0.18;
   head.add(nose);
 
-  // Subtle determined mouth
+  // Determined mouth line
   const mouth = new THREE.Mesh(
-    new THREE.BoxGeometry(0.044, 0.01, 0.012),
+    new THREE.BoxGeometry(0.044, 0.010, 0.012),
     mouthMat
   );
-  mouth.position.set(0, 0.055, 0.114);
+  mouth.position.set(0, 0.055, 0.115);
   head.add(mouth);
 
-  // Eyes & angled eyebrows (facing +z)
-  const eyeGeo = new THREE.SphereGeometry(0.018, 8, 6);
-  const pupilGeo = new THREE.SphereGeometry(0.0095, 6, 6);
-  const browGeo = new THREE.BoxGeometry(0.038, 0.011, 0.014);
+  // Detailed eyes (sclera + colored iris + pupil + specular catchlight) & angled brows
   [-1, 1].forEach((side) => {
-    const eye = new THREE.Mesh(eyeGeo, eyeWhiteMat);
-    eye.position.set(side * 0.042, 0.126, 0.106);
+    const eye = new THREE.Mesh(SHARED_GEO.eye, eyeWhiteMat);
+    eye.position.set(side * 0.042, 0.127, 0.105);
     head.add(eye);
-    const pupil = new THREE.Mesh(pupilGeo, pupilMat);
-    pupil.position.set(side * 0.042, 0.126, 0.121);
+    const iris = new THREE.Mesh(SHARED_GEO.iris, irisMat);
+    iris.position.set(side * 0.042, 0.127, 0.117);
+    head.add(iris);
+    const pupil = new THREE.Mesh(SHARED_GEO.pupil, pupilMat);
+    pupil.position.set(side * 0.042, 0.127, 0.123);
     head.add(pupil);
-    const brow = new THREE.Mesh(browGeo, hairMat);
-    brow.position.set(side * 0.042, 0.150, 0.113);
-    brow.rotation.z = side * -0.11;
+    const catchlight = new THREE.Mesh(SHARED_GEO.catchlight, catchlightMat);
+    catchlight.position.set(side * 0.042 + 0.005, 0.131, 0.128);
+    head.add(catchlight);
+    const brow = new THREE.Mesh(SHARED_GEO.brow, hairMat);
+    brow.position.set(side * 0.042, 0.151, 0.113);
+    brow.rotation.z = side * -0.12;
     head.add(brow);
   });
 
-  // Layered athletic hair (cap + swept front quiff + tapered sides + back)
+  // Fuller stylized athletic hair (dome cap + layered swept quiff + side fades + back taper)
   const hairCap = new THREE.Mesh(
-    new THREE.SphereGeometry(0.133, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.57),
+    new THREE.SphereGeometry(0.135, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.58),
     hairMat
   );
-  hairCap.scale.set(0.95, 1.05, 1.03);
-  hairCap.position.set(0, 0.124, -0.008);
+  hairCap.scale.set(0.96, 1.06, 1.04);
+  hairCap.position.set(0, 0.125, -0.008);
   head.add(hairCap);
 
   const hairQuiff = new THREE.Mesh(
-    new THREE.BoxGeometry(0.125, 0.055, 0.105),
+    new THREE.CapsuleGeometry(0.042, 0.078, 4, 8),
     hairMat
   );
-  hairQuiff.position.set(0.01, 0.232, 0.052);
-  hairQuiff.rotation.set(-0.26, 0.08, -0.10);
+  hairQuiff.rotation.set(-0.28, 0.10, Math.PI / 2 - 0.14);
+  hairQuiff.position.set(0.012, 0.236, 0.056);
   head.add(hairQuiff);
 
-  const hairBack = new THREE.Mesh(
-    new THREE.BoxGeometry(0.192, 0.095, 0.062),
+  const hairCrown = new THREE.Mesh(
+    new THREE.BoxGeometry(0.145, 0.042, 0.135),
     hairMat
   );
-  hairBack.position.set(0, 0.114, -0.105);
+  hairCrown.position.set(0, 0.228, -0.01);
+  hairCrown.rotation.x = -0.12;
+  head.add(hairCrown);
+
+  // Side-fade temple locks
+  [-1, 1].forEach((side) => {
+    const sideFade = new THREE.Mesh(
+      new THREE.BoxGeometry(0.026, 0.072, 0.095),
+      hairMat
+    );
+    sideFade.position.set(side * 0.114, 0.148, -0.024);
+    head.add(sideFade);
+  });
+
+  const hairBack = new THREE.Mesh(
+    new THREE.BoxGeometry(0.194, 0.105, 0.064),
+    hairMat
+  );
+  hairBack.position.set(0, 0.114, -0.104);
   head.add(hairBack);
 
   // ---- ARMS (Left = +x in local space, Right = -x) ----
   function buildArm(side) {
     const shoulder = new THREE.Group();
-    shoulder.position.set(side * 0.26, 0.435, 0);
+    shoulder.position.set(side * 0.265, 0.435, 0);
     torso.add(shoulder);
 
     const sleeveLen = isKeeper ? 0.26 : 0.16;
     const upperArmMesh = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.057, sleeveLen, 6, 10),
+      new THREE.CapsuleGeometry(0.058, sleeveLen, 6, 12),
       jerseyMat
     );
     upperArmMesh.position.set(0, -0.13, 0);
@@ -576,16 +706,16 @@ function buildHumanoidRig({
 
     // Sleeve cuff trim
     const sleeveCuff = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.058, 0.058, 0.022, 10),
+      new THREE.CylinderGeometry(0.059, 0.058, 0.022, 12),
       accentMat
     );
     sleeveCuff.position.set(0, isKeeper ? -0.26 : -0.20, 0);
     shoulder.add(sleeveCuff);
 
-    // Captain armband on shooter's left upper arm!
+    // Captain armband on shooter's left upper arm
     if (!isKeeper && side === 1) {
       const armband = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.061, 0.061, 0.048, 12),
+        new THREE.CylinderGeometry(0.062, 0.062, 0.048, 12),
         captainBandMat
       );
       armband.position.set(0, -0.155, 0);
@@ -594,7 +724,7 @@ function buildHumanoidRig({
 
     if (!isKeeper) {
       const bareUpper = new THREE.Mesh(
-        new THREE.CapsuleGeometry(0.046, 0.12, 6, 10),
+        new THREE.CapsuleGeometry(0.047, 0.12, 6, 10),
         skinMat
       );
       bareUpper.position.set(0, -0.22, 0);
@@ -607,52 +737,80 @@ function buildHumanoidRig({
 
     const forearmMat = isKeeper ? jerseyMat : skinMat;
     const forearmMesh = new THREE.Mesh(
-      new THREE.CapsuleGeometry(isKeeper ? 0.048 : 0.042, 0.20, 6, 10),
+      new THREE.CylinderGeometry(isKeeper ? 0.049 : 0.045, isKeeper ? 0.040 : 0.036, 0.25, 10),
       forearmMat
     );
     forearmMesh.position.set(0, -0.13, 0);
     elbow.add(forearmMesh);
+
+    // Athletic white wrist tape on shooter's right wrist (pro striker detail!)
+    if (!isKeeper && side === -1) {
+      const wristTape = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.040, 0.039, 0.056, 10),
+        tapeMat
+      );
+      wristTape.position.set(0, -0.235, 0);
+      elbow.add(wristTape);
+    }
 
     const hand = new THREE.Group();
     hand.position.set(0, -0.27, 0);
     elbow.add(hand);
 
     if (isKeeper) {
-      // Detailed padded goalkeeper glove with strap, latex backhand, grip palm & thumb
+      // Upgraded goalkeeper glove: Velcro strap + pull tab + latex backhand + 4 finger ridges + distinct grip palm + thumb
       const cuff = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.053, 0.056, 0.065, 10),
+        new THREE.CylinderGeometry(0.053, 0.057, 0.068, 12),
         gloveStrapMat
       );
       cuff.position.set(0, -0.01, 0);
       hand.add(cuff);
 
-      const gloveBody = new THREE.Mesh(
-        new THREE.BoxGeometry(0.098, 0.155, 0.068),
+      // Velcro strap tab
+      const strapTab = new THREE.Mesh(
+        new THREE.BoxGeometry(0.095, 0.026, 0.022),
         gloveMat
       );
-      gloveBody.position.set(0, -0.092, 0);
+      strapTab.position.set(0, -0.012, -0.046);
+      hand.add(strapTab);
+
+      const gloveBody = new THREE.Mesh(
+        new THREE.BoxGeometry(0.100, 0.155, 0.066),
+        gloveMat
+      );
+      gloveBody.position.set(0, -0.094, 0);
       hand.add(gloveBody);
 
-      // Backhand knuckle pad
+      // Padded backhand knuckle armor
       const knucklePad = new THREE.Mesh(
-        new THREE.BoxGeometry(0.09, 0.045, 0.02),
+        new THREE.BoxGeometry(0.094, 0.044, 0.022),
         gloveStrapMat
       );
-      knucklePad.position.set(0, -0.085, -0.032);
+      knucklePad.position.set(0, -0.082, -0.032);
       hand.add(knucklePad);
 
+      // Articulated finger ridges
+      for (let f = 0; f < 4; f++) {
+        const fx = -0.034 + f * 0.0225;
+        const finger = new THREE.Mesh(SHARED_GEO.fingerRidge, gloveMat);
+        finger.position.set(fx, -0.145, -0.028);
+        hand.add(finger);
+      }
+
+      // Distinct high-contrast latex grip palm
       const palm = new THREE.Mesh(
-        new THREE.BoxGeometry(0.09, 0.14, 0.026),
+        new THREE.BoxGeometry(0.094, 0.146, 0.026),
         glovePalmMat
       );
-      palm.position.set(0, -0.092, 0.032);
+      palm.position.set(0, -0.094, 0.032);
       hand.add(palm);
 
+      // Sculpted thumb wrap
       const thumb = new THREE.Mesh(
-        new THREE.BoxGeometry(0.038, 0.068, 0.038),
+        new THREE.BoxGeometry(0.040, 0.072, 0.040),
         gloveMat
       );
-      thumb.position.set(-side * 0.058, -0.068, 0.016);
+      thumb.position.set(-side * 0.060, -0.068, 0.018);
       thumb.rotation.z = side * 0.42;
       hand.add(thumb);
     } else {
@@ -670,14 +828,14 @@ function buildHumanoidRig({
   const leftArm = buildArm(1);
   const rightArm = buildArm(-1);
 
-  // ---- LEGS ----
+  // ---- LEGS (defined thighs, calves, folded sock cuffs, shin-guard contour, laced studded boots) ----
   function buildLeg(side) {
     const hip = new THREE.Group();
     hip.position.set(side * 0.106, -0.06, 0);
     hips.add(hip);
 
     const shortLeg = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.086, 0.078, 0.22, 10),
+      new THREE.CylinderGeometry(0.088, 0.078, 0.22, 12),
       shortsMat
     );
     shortLeg.position.set(0, -0.10, 0);
@@ -685,74 +843,141 @@ function buildHumanoidRig({
 
     // Side accent stripe on shorts
     const shortStripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.014, 0.21, 0.032),
+      new THREE.BoxGeometry(0.015, 0.21, 0.034),
       accentMat
     );
-    shortStripe.position.set(side * 0.082, -0.10, 0);
+    shortStripe.position.set(side * 0.083, -0.10, 0);
     hip.add(shortStripe);
 
+    // Sculpted athletic thigh (tapers naturally toward knee)
     const thigh = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.065, 0.18, 6, 10),
+      new THREE.CylinderGeometry(0.073, 0.056, 0.24, 12),
       skinMat
     );
-    thigh.position.set(0, -0.27, 0);
+    thigh.position.set(0, -0.28, 0.004);
     hip.add(thigh);
+
+    // Subtle knee cap
+    const kneeCap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 10, 8),
+      skinMat
+    );
+    kneeCap.position.set(0, -0.41, 0.006);
+    hip.add(kneeCap);
 
     const knee = new THREE.Group();
     knee.position.set(0, -0.42, 0);
     hip.add(knee);
 
-    // Tall football sock
+    // Tapered athletic lower leg / sock
     const sock = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.055, 0.28, 6, 10),
+      new THREE.CylinderGeometry(0.058, 0.043, 0.35, 12),
       sockMat
     );
-    sock.position.set(0, -0.19, 0);
+    sock.position.set(0, -0.195, 0);
     knee.add(sock);
 
-    // Dual sock trim bands
+    // Defined calf muscle bulge on back (-z)
+    const calfBulge = new THREE.Mesh(
+      new THREE.SphereGeometry(0.052, 10, 8),
+      sockMat
+    );
+    calfBulge.scale.set(0.92, 1.55, 0.85);
+    calfBulge.position.set(0, -0.145, -0.022);
+    knee.add(calfBulge);
+
+    // Shin-guard contour on front (+z)
+    const shinGuard = new THREE.Mesh(
+      new THREE.BoxGeometry(0.068, 0.165, 0.028),
+      sockMat
+    );
+    shinGuard.position.set(0, -0.185, 0.042);
+    knee.add(shinGuard);
+
+    // Folded sock cuff + dual trim bands
+    const foldedCuff = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.064, 0.062, 0.042, 12),
+      sockMat
+    );
+    foldedCuff.position.set(0, -0.038, 0);
+    knee.add(foldedCuff);
+
     const bandTop = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.060, 0.058, 0.038, 10),
+      new THREE.CylinderGeometry(0.065, 0.065, 0.016, 12),
       sockBandMat
     );
-    bandTop.position.set(0, -0.052, 0);
+    bandTop.position.set(0, -0.028, 0);
     knee.add(bandTop);
+
+    const bandLow = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.061, 0.060, 0.014, 12),
+      sockBandMat
+    );
+    bandLow.position.set(0, -0.072, 0);
+    knee.add(bandLow);
 
     const ankle = new THREE.Group();
     ankle.position.set(0, -0.39, 0);
     knee.add(ankle);
 
-    // Detailed specular football boot
+    // Detailed specular laced football boot with soleplate & studs
     const bootMain = new THREE.Mesh(
-      new THREE.BoxGeometry(0.096, 0.078, 0.23),
+      new THREE.BoxGeometry(0.096, 0.076, 0.225),
       bootMat
     );
-    bootMain.position.set(0, -0.028, 0.055);
+    bootMain.position.set(0, -0.027, 0.054);
     ankle.add(bootMain);
 
     const bootToe = new THREE.Mesh(
-      new THREE.SphereGeometry(0.049, 10, 8),
+      new THREE.SphereGeometry(0.049, 12, 8),
       bootMat
     );
-    bootToe.scale.set(0.98, 0.72, 1.18);
-    bootToe.position.set(0, -0.035, 0.168);
+    bootToe.scale.set(0.98, 0.72, 1.20);
+    bootToe.position.set(0, -0.034, 0.166);
     ankle.add(bootToe);
 
-    // Specular side accent & heel counter
-    const bootStripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.102, 0.022, 0.135),
+    // Heel counter accent
+    const heelCounter = new THREE.Mesh(
+      new THREE.BoxGeometry(0.098, 0.056, 0.048),
       bootAccentMat
     );
-    bootStripe.position.set(0, -0.022, 0.052);
+    heelCounter.position.set(0, -0.022, -0.042);
+    ankle.add(heelCounter);
+
+    // Specular side accent stripe
+    const bootStripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.102, 0.020, 0.135),
+      bootAccentMat
+    );
+    bootStripe.position.set(0, -0.024, 0.058);
     ankle.add(bootStripe);
 
-    // Soleplate
+    // Crisp laces across the instep
+    for (let li = 0; li < 3; li++) {
+      const lace = new THREE.Mesh(SHARED_GEO.lace, tapeMat);
+      lace.position.set(0, 0.012 - li * 0.005, 0.056 + li * 0.032);
+      lace.rotation.x = 0.22;
+      ankle.add(lace);
+    }
+
+    // Soleplate + 6 metallic studs (4 forefoot, 2 heel)
     const sole = new THREE.Mesh(
-      new THREE.BoxGeometry(0.094, 0.016, 0.25),
+      new THREE.BoxGeometry(0.094, 0.015, 0.248),
       soleMat
     );
-    sole.position.set(0, -0.066, 0.065);
+    sole.position.set(0, -0.065, 0.064);
     ankle.add(sole);
+
+    const studCoords = [
+      [-0.030, 0.145], [0.030, 0.145],
+      [-0.032, 0.082], [0.032, 0.082],
+      [-0.028, -0.025], [0.028, -0.025],
+    ];
+    for (let si = 0; si < studCoords.length; si++) {
+      const stud = new THREE.Mesh(SHARED_GEO.stud, studMat);
+      stud.position.set(studCoords[si][0], -0.078, studCoords[si][1]);
+      ankle.add(stud);
+    }
 
     return { hip, knee, ankle };
   }

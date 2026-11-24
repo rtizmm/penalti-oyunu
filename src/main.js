@@ -24,6 +24,7 @@ const STORAGE_ENV = 'penalti_env_v2';
 const STORAGE_KIT = 'penalti_kit_v2';
 const STORAGE_STATS = 'penalti_stats_v2';
 const STORAGE_NAME = 'penalti_name_v3';
+const STORAGE_QUALITY = 'penalti_gfx_v4';
 
 const $ = (id) => document.getElementById(id);
 
@@ -68,6 +69,7 @@ const ui = {
   slowmo: $('slowmo'),
   toast: $('toast'),
   replayHud: $('replayHud'),
+  replayProgress: $('replayProgress'),
   btnSkipReplay: $('btnSkipReplay'),
   shotBar: $('shotBar'),
   timedBar: $('timedBar'),
@@ -88,6 +90,7 @@ const ui = {
   diffNote: $('diffNote'),
   timeSeg: $('timeSeg'),
   weatherSeg: $('weatherSeg'),
+  qualitySeg: $('qualitySeg'),
   teamSwatches: $('teamSwatches'),
   jerseyInput: $('jerseyInput'),
   ballSkinChips: $('ballSkinChips'),
@@ -182,6 +185,7 @@ const settings = {
   muted: localStorage.getItem(STORAGE_MUTE) === '1',
   timeOfDay: savedEnv.timeOfDay,
   weather: savedEnv.weather,
+  quality: localStorage.getItem(STORAGE_QUALITY) || 'high',
   announcer: savedEnv.announcer !== false,
   teamId: savedKit.teamId,
   jerseyNumber: Math.max(1, Math.min(99, Number(savedKit.number) || 10)),
@@ -196,6 +200,7 @@ if (!CAMERA_MODES.some((m) => m.id === settings.cameraId)) {
 }
 if (!TEAM_PRESETS.some((t) => t.id === settings.teamId)) settings.teamId = TEAM_PRESETS[0].id;
 if (!BALL_SKINS.some((s) => s.id === settings.ballSkin)) settings.ballSkin = 'classic';
+if (!['medium', 'high', 'ultra'].includes(settings.quality)) settings.quality = 'high';
 
 const DEFAULT_STATS = {
   totalGoals: 0,
@@ -766,6 +771,63 @@ const tmpFwd = new THREE.Vector3();
 const tmpRight = new THREE.Vector3();
 const worldUp = new THREE.Vector3(0, 1, 0);
 
+function applyGraphicsQuality(q = settings.quality) {
+  const level = ['medium', 'high', 'ultra'].includes(q) ? q : 'high';
+  settings.quality = level;
+  const maxDpr = level === 'medium' ? 1.25 : level === 'high' ? 1.75 : 2.0;
+  const shadowRes = level === 'medium' ? 1024 : 2048;
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.classList.toggle('ultra-gfx', level === 'ultra');
+
+  scene.traverse((obj) => {
+    if (obj.isDirectionalLight && obj.castShadow && obj.shadow) {
+      if (obj.shadow.mapSize.x !== shadowRes || obj.shadow.mapSize.y !== shadowRes) {
+        obj.shadow.mapSize.set(shadowRes, shadowRes);
+        if (obj.shadow.map) {
+          obj.shadow.map.dispose();
+          obj.shadow.map = null;
+        }
+      }
+    }
+  });
+}
+
+function syncStadiumJumbotron(bannerText = '') {
+  if (!world.setStadiumScore) return;
+  let homeName = 'SEN';
+  let awayName = 'RAKİP';
+  let homeScore = state.userScore;
+  let awayScore = state.aiScore;
+
+  if (settings.mode === 'online' && online.players) {
+    const mySide = online.side || 'host';
+    const oppSide = mySide === 'host' ? 'guest' : 'host';
+    homeName = (online.players[mySide]?.name || 'SEN').slice(0, 10).toUpperCase();
+    awayName = (online.players[oppSide]?.name || 'RAKİP').slice(0, 10).toUpperCase();
+  } else if (settings.mode === 'tournament') {
+    awayName = TOURNAMENT_STAGES[state.tournamentStage].opponent.slice(0, 10).toUpperCase();
+  } else if (settings.mode === 'local2p') {
+    homeName = 'P1 ŞUT';
+    awayName = 'P2 KALE';
+  } else if (settings.mode === 'shooter') {
+    homeName = 'PENALTI';
+    awayName = 'KALECİ';
+    awayScore = Math.max(0, state.userResults.length - state.userScore);
+  } else if (settings.mode === 'keeper') {
+    homeName = 'KALECİ';
+    awayName = 'RAKİP';
+    awayScore = Math.max(0, state.userResults.length - state.userScore);
+  } else if (settings.mode === 'targets') {
+    homeName = 'HEDEF';
+    awayName = 'PUAN';
+    awayScore = state.targetScore;
+  }
+
+  world.setStadiumScore(homeName, homeScore, awayName, awayScore, bannerText || (state.suddenDeath ? 'ANİ ÖLÜM' : 'PENALTI ARENA'));
+}
+
 // ============ ORTAM, FORMA, RÜZGAR ============
 function applyEnvironment() {
   const expMap = { day: 1.04, sunset: 1.12, night: 1.18 };
@@ -1019,6 +1081,9 @@ function syncMenuUI() {
   ui.weatherSeg.querySelectorAll('button').forEach((b) => {
     b.classList.toggle('active', b.dataset.weather === settings.weather);
   });
+  ui.qualitySeg.querySelectorAll('button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.quality === settings.quality);
+  });
   ui.teamSwatches.querySelectorAll('.swatch-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.team === settings.teamId);
   });
@@ -1106,6 +1171,7 @@ function updateScoreboard() {
       ? `ANİ ÖLÜM — ${online.round}. TUR`
       : `${Math.min(5, online.round)}. TUR / 5`;
     updateBracketUI();
+    syncStadiumJumbotron();
     return;
   }
 
@@ -1167,6 +1233,7 @@ function updateScoreboard() {
       : `${Math.min(5, roundNum)}. TUR / 5`;
   }
   updateBracketUI();
+  syncStadiumJumbotron();
 }
 
 function updateCurlUI() {
@@ -1679,6 +1746,8 @@ function resolveKick(outcome, info = {}) {
 
   // Online 1v1: sonucu sunucuya bildir (skor sunucudan onTurnScored ile gelir)
   if (online.active) {
+    const bannerLabel = outcome === 'goal' ? 'GOL!' : outcome === 'save' ? 'KURTARIŞ!' : outcome === 'post' ? 'DİREK!' : 'AUT!';
+    syncStadiumJumbotron(bannerLabel);
     getNetClient().reportResult(online.turnId, outcome);
     return;
   }
@@ -1725,18 +1794,61 @@ function resolveKick(outcome, info = {}) {
   }
 
   updateScoreboard();
+  const bannerLabel = outcome === 'goal' ? 'GOL!' : outcome === 'save' ? 'KURTARIŞ!' : outcome === 'post' ? 'DİREK!' : 'AUT!';
+  syncStadiumJumbotron(bannerLabel);
 }
 
-// ============ OTOMATİK TEKRAR (INSTANT REPLAY) ============
+// ============ OTOMATİK TEKRAR (INSTANT REPLAY — TAM İSKELET POZLARI) ============
+const shooterNodes = [];
+const keeperNodes = [];
+shooter.group.traverse((o) => shooterNodes.push(o));
+keeper.group.traverse((o) => keeperNodes.push(o));
+
+function captureRigPose(nodes) {
+  const arr = new Float32Array(nodes.length * 6);
+  for (let i = 0; i < nodes.length; i++) {
+    const o = nodes[i];
+    const base = i * 6;
+    arr[base] = o.position.x;
+    arr[base + 1] = o.position.y;
+    arr[base + 2] = o.position.z;
+    arr[base + 3] = o.rotation.x;
+    arr[base + 4] = o.rotation.y;
+    arr[base + 5] = o.rotation.z;
+  }
+  return arr;
+}
+
+function applyRigPoseLerp(nodes, poseA, poseB, alpha) {
+  const t = Math.max(0, Math.min(1, alpha));
+  const inv = 1 - t;
+  for (let i = 0; i < nodes.length; i++) {
+    const o = nodes[i];
+    const base = i * 6;
+    o.position.set(
+      poseA[base] * inv + poseB[base] * t,
+      poseA[base + 1] * inv + poseB[base + 1] * t,
+      poseA[base + 2] * inv + poseB[base + 2] * t
+    );
+    o.rotation.set(
+      poseA[base + 3] * inv + poseB[base + 3] * t,
+      poseA[base + 4] * inv + poseB[base + 4] * t,
+      poseA[base + 5] * inv + poseB[base + 5] * t
+    );
+  }
+}
+
+const tmpReplayPos = new THREE.Vector3();
+const tmpReplayQuat = new THREE.Quaternion();
+
 function recordReplayFrame() {
   if (state.replayFrames.length >= 360) state.replayFrames.shift();
   state.replayFrames.push({
+    isFlight: state.phase === 'flight' || state.phase === 'result',
     ballPos: ball.position.clone(),
     ballQuat: ball.mesh.quaternion.clone(),
-    shooterPos: shooter.group.position.clone(),
-    shooterRotY: shooter.group.rotation.y,
-    keeperPos: keeper.group.position.clone(),
-    keeperRotY: keeper.group.rotation.y,
+    shooterPose: captureRigPose(shooterNodes),
+    keeperPose: captureRigPose(keeperNodes),
   });
 }
 
@@ -1746,16 +1858,22 @@ function startReplay() {
     return;
   }
   state.phase = 'replay';
-  // Son ~95 kare (~1.5 sn: vuruş anından hemen önce + uçuş + gol/kurtarış)
-  const startIdx = Math.max(0, state.replayFrames.length - 95);
+  // Top teması (ilk isFlight karesi) ~0.25s (~15 kare) öncesinden başlat (boş bekleme yok!)
+  const kickIdx = state.replayFrames.findIndex((f) => f.isFlight);
+  const startIdx = kickIdx >= 0
+    ? Math.max(0, kickIdx - 15)
+    : Math.max(0, state.replayFrames.length - 95);
+  state.replayStartIndex = startIdx;
   state.replayIndex = startIdx;
-  state.replayTimer = 2.35;
-  state.replayPrevCam = settings.cameraId;
+  state.replayEndIndex = state.replayFrames.length - 1;
+  state.replayTimer = online.active ? 2.0 : 2.6;
+  state.replayPrevCam = cameraRig.getMode();
 
-  const altCam = settings.cameraId === 'behindGoal' ? 'cinematic' : 'behindGoal';
+  const altCam = state.replayPrevCam === 'behindGoal' ? 'cinematic' : 'behindGoal';
   cameraRig.setMode(altCam);
   ball.clearTrail();
   hideBanner();
+  ui.replayProgress.style.width = '0%';
   ui.replayHud.classList.remove('hidden');
 }
 
@@ -2204,6 +2322,15 @@ ui.weatherSeg.querySelectorAll('button').forEach((btn) => {
   });
 });
 
+ui.qualitySeg.querySelectorAll('button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    settings.quality = btn.dataset.quality;
+    localStorage.setItem(STORAGE_QUALITY, settings.quality);
+    applyGraphicsQuality(settings.quality);
+    syncMenuUI();
+  });
+});
+
 ui.jerseyInput.addEventListener('change', () => {
   const n = Math.max(1, Math.min(99, parseInt(ui.jerseyInput.value, 10) || 10));
   settings.jerseyNumber = n;
@@ -2424,19 +2551,27 @@ function tick(now) {
   const cfg = getDifficulty(state.activeDifficulty);
 
   if (state.phase === 'replay') {
-    // Otomatik ağır çekim tekrar (0.35×)
+    // Otomatik ağır çekim tekrar (0.38×, tam iskelet + yumuşak ara-kare interpolasyonu)
     state.replayTimer -= rawDt;
-    state.replayIndex += rawDt * 60 * 0.35;
-    const idx = Math.min(state.replayFrames.length - 1, Math.floor(state.replayIndex));
-    const frame = state.replayFrames[idx];
-    if (frame) {
-      ball.setReplayPose(frame.ballPos, frame.ballQuat, true);
-      shooter.group.position.copy(frame.shooterPos);
-      shooter.group.rotation.y = frame.shooterRotY;
-      keeper.group.position.copy(frame.keeperPos);
-      keeper.group.rotation.y = frame.keeperRotY;
+    state.replayIndex += rawDt * 60 * 0.38;
+    const maxIdx = Math.max(0, state.replayFrames.length - 1);
+    const i0 = Math.min(maxIdx, Math.floor(state.replayIndex));
+    const i1 = Math.min(maxIdx, i0 + 1);
+    const frac = Math.max(0, Math.min(1, state.replayIndex - i0));
+    const f0 = state.replayFrames[i0];
+    const f1 = state.replayFrames[i1];
+    if (f0 && f1) {
+      tmpReplayPos.lerpVectors(f0.ballPos, f1.ballPos, frac);
+      tmpReplayQuat.slerpQuaternions(f0.ballQuat, f1.ballQuat, frac);
+      ball.setReplayPose(tmpReplayPos, tmpReplayQuat, true);
+      applyRigPoseLerp(shooterNodes, f0.shooterPose, f1.shooterPose, frac);
+      applyRigPoseLerp(keeperNodes, f0.keeperPose, f1.keeperPose, frac);
     }
-    world.update(rawDt * 0.35);
+    const span = Math.max(1, (state.replayEndIndex || maxIdx) - (state.replayStartIndex || 0));
+    const pct = Math.min(100, Math.max(0, ((state.replayIndex - (state.replayStartIndex || 0)) / span) * 100));
+    ui.replayProgress.style.width = `${pct.toFixed(1)}%`;
+
+    world.update(rawDt * 0.38);
     cameraRig.update(rawDt, {
       ball: ball.position,
       ballVel: ball.velocity,
@@ -2446,7 +2581,7 @@ function tick(now) {
       userRole: state.userRole,
       isReplay: true,
     });
-    if (state.replayTimer <= 0 || idx >= state.replayFrames.length - 1) {
+    if (state.replayTimer <= 0 || i0 >= maxIdx) {
       stopReplayAndAdvance();
     }
     renderer.render(scene, camera);
@@ -2625,6 +2760,7 @@ audio.setAnnouncerEnabled?.(settings.announcer);
 cameraRig.setMode(settings.cameraId);
 ball.setSkin(settings.ballSkin);
 applyEnvironment();
+applyGraphicsQuality(settings.quality);
 buildStaticUI();
 syncMenuUI();
 applyTeamKits();
@@ -2632,6 +2768,7 @@ rollWind();
 ball.reset(PENALTY_SPOT);
 shooter.reset();
 keeper.reset();
+syncStadiumJumbotron('PENALTI ARENA');
 ui.loading.classList.add('hidden');
 requestAnimationFrame(tick);
 

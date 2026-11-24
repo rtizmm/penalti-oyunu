@@ -70,6 +70,7 @@ export function createCameraRig(camera) {
     const keeperPos = getObjectPos(ctx && ctx.keeper, defaultKeeperPos, tmpKeeperPos);
     const shooterPos = getObjectPos(ctx && ctx.shooter, defaultShooterPos, tmpShooterPos);
     const phase = (ctx && ctx.phase) || 'aim';
+    const isReplay = Boolean(ctx && ctx.isReplay);
     const inFlight = phase === 'flight' || phase === 'result';
 
     // Update estimated ball travel direction for ballCam
@@ -87,6 +88,36 @@ export function createCameraRig(camera) {
       }
     }
     prevBallPos.copy(ball);
+
+    // Polished TV broadcast slow-mo replay framing (never clips into net or stands)
+    if (isReplay) {
+      if (mode === 'behindGoal') {
+        targetPos.set(
+          Math.max(-4.2, Math.min(4.2, ball.x * 0.35)),
+          1.95,
+          -5.2
+        );
+        targetLook.set(
+          ball.x * 0.85,
+          Math.max(0.5, ball.y * 0.9),
+          Math.max(-1.2, Math.min(8.5, ball.z * 0.85))
+        );
+        return 5.5;
+      }
+      // Low dramatic broadcast angle on the opposite side of the shot, staying safely in front of z=0
+      const sideSign = ball.x >= 0 ? -1 : 1;
+      targetPos.set(
+        sideSign * 5.6 + ball.x * 0.22,
+        Math.max(1.2, 1.38 + ball.y * 0.32),
+        Math.max(2.3, Math.min(13.5, ball.z * 0.55 + 3.4))
+      );
+      targetLook.set(
+        ball.x * 0.88,
+        Math.max(0.45, ball.y * 0.85),
+        Math.max(-1.1, Math.min(9.5, ball.z * 0.85))
+      );
+      return 5.5;
+    }
 
     switch (mode) {
       case 'broadcast': {

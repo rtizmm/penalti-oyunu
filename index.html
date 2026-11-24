@@ -26,6 +26,7 @@
 </head>
 <body>
   <canvas id="game"></canvas>
+  <div id="vignette"></div>
 
   <!-- ============ OYUN İÇİ HUD ============ -->
   <div id="hud" class="hidden">
@@ -107,8 +108,11 @@
 
     <!-- Tekrar (Instant Replay) kaplaması -->
     <div id="replayHud" class="hidden">
-      <div class="rp-badge">● TEKRAR</div>
-      <button id="btnSkipReplay" class="rp-skip">GEÇ [Boşluk]</button>
+      <div class="rp-top">
+        <div class="rp-badge">● AĞIR ÇEKİM TEKRAR</div>
+        <button id="btnSkipReplay" class="rp-skip">GEÇ [Boşluk / Tıkla]</button>
+      </div>
+      <div class="rp-track"><div class="rp-fill" id="replayProgress"></div></div>
     </div>
 
     <!-- Şut tipi seçici (penaltıcıyken) -->
@@ -225,7 +229,7 @@
         </div>
 
         <div class="menu-section compact">
-          <div class="menu-label">STADYUM & HAVA</div>
+          <div class="menu-label">STADYUM, HAVA & GRAFİK</div>
           <div class="env-row">
             <div class="seg mini" id="timeSeg">
               <button data-time="day">☀️ Gündüz</button>
@@ -236,6 +240,11 @@
               <button data-weather="clear">Açık</button>
               <button data-weather="rain">🌧️ Yağmur</button>
               <button data-weather="snow">❄️ Kar</button>
+            </div>
+            <div class="seg mini" id="qualitySeg" title="Grafik Kalitesi">
+              <button data-quality="medium">Orta</button>
+              <button data-quality="high">Yüksek</button>
+              <button data-quality="ultra">✨ Ultra</button>
             </div>
           </div>
         </div>

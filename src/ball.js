@@ -14,6 +14,100 @@ export const BALL_SKINS = [
 ];
 
 const textureCache = new Map();
+let detailMapsCache = null;
+
+/**
+ * 3D panel dikişleri için prosedürel bumpMap + roughnessMap (tüm top tasarımlarında ortak).
+ */
+function getBallDetailMaps() {
+  if (detailMapsCache) return detailMapsCache;
+
+  const size = 512;
+  const bumpCanvas = document.createElement('canvas');
+  bumpCanvas.width = size;
+  bumpCanvas.height = size;
+  const bCtx = bumpCanvas.getContext('2d');
+
+  const roughCanvas = document.createElement('canvas');
+  roughCanvas.width = size;
+  roughCanvas.height = size;
+  const rCtx = roughCanvas.getContext('2d');
+
+  // Taban: parlak deri paneller (bump = yüksek/açık, roughness = düşük/koyu)
+  bCtx.fillStyle = '#dcdcdc';
+  bCtx.fillRect(0, 0, size, size);
+  rCtx.fillStyle = '#525252'; // ~0.32 pürüzlülük
+  rCtx.fillRect(0, 0, size, size);
+
+  // İnce deri mikro-dokusu (deterministik)
+  for (let i = 0; i < 2400; i++) {
+    const x = (i * 197) % size;
+    const y = (i * 353 + Math.floor(i / 40) * 19) % size;
+    bCtx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+    bCtx.fillRect(x, y, 2, 2);
+  }
+
+  // Girintili dikiş olukları (bump = koyu çukur, roughness = mat/açık)
+  const strokeSeam = (drawPath) => {
+    bCtx.save();
+    bCtx.strokeStyle = '#1a1a1a';
+    bCtx.lineWidth = 4.5;
+    drawPath(bCtx);
+    bCtx.stroke();
+    bCtx.strokeStyle = '#ffffff';
+    bCtx.lineWidth = 1.2;
+    bCtx.globalAlpha = 0.25;
+    drawPath(bCtx);
+    bCtx.stroke();
+    bCtx.restore();
+
+    rCtx.save();
+    rCtx.strokeStyle = '#d8d8d8'; // ~0.85 mat dikiş
+    rCtx.lineWidth = 5;
+    drawPath(rCtx);
+    rCtx.stroke();
+    rCtx.restore();
+  };
+
+  const polyPath = (cx, cy, r, sides, rot) => (ctx) => {
+    ctx.beginPath();
+    for (let i = 0; i < sides; i++) {
+      const a = rot + (i * Math.PI * 2) / sides - Math.PI / 2;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  };
+
+  // Kutup ve ekvator beşgen dikişleri
+  strokeSeam(polyPath(size * 0.5, size * 0.06, 30, 5, 0));
+  strokeSeam(polyPath(size * 0.5, size * 0.94, 30, 5, Math.PI));
+  for (let i = 0; i < 5; i++) {
+    const x1 = ((i + 0.5) / 5) * size;
+    const x2 = ((i / 5) * size + size) % size;
+    strokeSeam(polyPath(x1, size * 0.30, 34, 5, i * 0.25));
+    strokeSeam(polyPath(x2, size * 0.70, 34, 5, Math.PI + i * 0.25));
+    // Bağlantı dikiş çizgileri
+    strokeSeam((ctx) => {
+      ctx.beginPath();
+      ctx.moveTo(x1, size * 0.30 + 34);
+      ctx.lineTo(x2, size * 0.70 - 34);
+    });
+  }
+
+  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.ClampToEdgeWrapping;
+
+  const roughnessMap = new THREE.CanvasTexture(roughCanvas);
+  roughnessMap.wrapS = THREE.RepeatWrapping;
+  roughnessMap.wrapT = THREE.ClampToEdgeWrapping;
+
+  detailMapsCache = { bumpMap, roughnessMap };
+  return detailMapsCache;
+}
 
 /**
  * Seçilebilir futbol topu dokuları (CanvasTexture, harici dosya gerektirmez).
@@ -160,11 +254,15 @@ function closestPointOnSegment(p, a, b, out) {
 export function createBall(scene, goal) {
   const GOAL = goal || { halfWidth: 3.66, height: 2.44, postRadius: 0.06 };
 
-  const geom = new THREE.SphereGeometry(BALL_RADIUS, 28, 20);
+  const geom = new THREE.SphereGeometry(BALL_RADIUS, 32, 24);
+  const { bumpMap, roughnessMap } = getBallDetailMaps();
   const mat = new THREE.MeshStandardMaterial({
     map: getBallTexture('classic'),
-    roughness: 0.36,
-    metalness: 0.08,
+    bumpMap,
+    bumpScale: 0.014,
+    roughnessMap,
+    roughness: 0.85,
+    metalness: 0.10,
   });
   const mesh = new THREE.Mesh(geom, mat);
   mesh.castShadow = true;
@@ -270,8 +368,8 @@ export function createBall(scene, goal) {
 
   function setSkin(skinId) {
     mat.map = getBallTexture(skinId);
-    mat.metalness = skinId === 'gold' ? 0.55 : 0.08;
-    mat.roughness = skinId === 'gold' ? 0.25 : 0.36;
+    mat.metalness = skinId === 'gold' ? 0.55 : 0.10;
+    mat.roughness = skinId === 'gold' ? 0.58 : 0.85;
     mat.needsUpdate = true;
   }
 

@@ -10,9 +10,9 @@ const NET_DEPTH_TOP = 1.65;
 const NET_DEPTH_BOTTOM = 2.15;
 
 function createGrassTextures() {
-  const size = 1024;
+  const size = 2048;
 
-  // Color map: mowed stripes + cross-cut + turf grain
+  // High-res color map: high-contrast mowed stripes + cross-cut + fine grass blades
   const colorCanvas = document.createElement('canvas');
   colorCanvas.width = size;
   colorCanvas.height = size;
@@ -21,16 +21,16 @@ function createGrassTextures() {
   const stripeCount = 16;
   const stripeH = size / stripeCount;
   for (let i = 0; i < stripeCount; i++) {
-    ctx.fillStyle = i % 2 === 0 ? '#2f853a' : '#267231';
+    ctx.fillStyle = i % 2 === 0 ? '#328f3e' : '#236c2e';
     ctx.fillRect(0, i * stripeH, size, stripeH + 1);
   }
 
-  // Subtle cross-cut mow pattern
-  ctx.globalAlpha = 0.055;
-  const vStripes = 12;
+  // Subtle cross-cut stadium mow sheen
+  ctx.globalAlpha = 0.065;
+  const vStripes = 14;
   const vW = size / vStripes;
   for (let i = 0; i < vStripes; i++) {
-    ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#000000';
+    ctx.fillStyle = i % 2 === 0 ? '#d8ffbe' : '#08240c';
     ctx.fillRect(i * vW, 0, vW, size);
   }
   ctx.globalAlpha = 1.0;
@@ -50,23 +50,23 @@ function createGrassTextures() {
   bCtx.fillStyle = '#808080';
   bCtx.fillRect(0, 0, 512, 512);
 
-  // Fine turf blade noise on color, roughness, and bump
-  for (let i = 0; i < 36000; i++) {
+  // Fine turf blade noise on high-res color map
+  for (let i = 0; i < 65000; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
-    const bright = Math.random() > 0.48;
-    ctx.fillStyle = bright ? 'rgba(145, 224, 102, 0.09)' : 'rgba(10, 48, 15, 0.1)';
-    ctx.fillRect(x, y, 2, 3);
+    const bright = Math.random() > 0.46;
+    ctx.fillStyle = bright ? 'rgba(155, 232, 108, 0.11)' : 'rgba(8, 42, 13, 0.12)';
+    ctx.fillRect(x, y, 2, 4);
   }
 
-  for (let i = 0; i < 26000; i++) {
+  for (let i = 0; i < 28000; i++) {
     const x = Math.random() * 512;
     const y = Math.random() * 512;
-    const v = 165 + Math.floor(Math.random() * 80);
+    const v = 160 + Math.floor(Math.random() * 85);
     rCtx.fillStyle = `rgb(${v},${v},${v})`;
     rCtx.fillRect(x, y, 2, 2);
 
-    const bv = 75 + Math.floor(Math.random() * 140);
+    const bv = 70 + Math.floor(Math.random() * 150);
     bCtx.fillStyle = `rgb(${bv},${bv},${bv})`;
     bCtx.fillRect(x, y, 1.5, 2.5);
   }
@@ -76,7 +76,7 @@ function createGrassTextures() {
   map.wrapS = THREE.RepeatWrapping;
   map.wrapT = THREE.RepeatWrapping;
   map.repeat.set(2, 2);
-  map.anisotropy = 8;
+  map.anisotropy = 16;
 
   const roughnessMap = new THREE.CanvasTexture(roughCanvas);
   roughnessMap.wrapS = THREE.RepeatWrapping;
@@ -219,32 +219,141 @@ function createSkyTexture(timeOfDay) {
   return tex;
 }
 
-function createScoreboardTexture() {
+function createJumbotronCanvas() {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
-  canvas.height = 256;
+  canvas.height = 288;
+  const ctx = canvas.getContext('2d');
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+
+  function draw(homeName, homeScore, awayName, awayScore, bannerText) {
+    const hName = (homeName !== undefined && homeName !== null && String(homeName).trim())
+      ? String(homeName).trim().toUpperCase().slice(0, 14)
+      : 'EV SAHİBİ';
+    const aName = (awayName !== undefined && awayName !== null && String(awayName).trim())
+      ? String(awayName).trim().toUpperCase().slice(0, 14)
+      : 'DEPLASMAN';
+    const hScore = Number.isFinite(Number(homeScore)) ? Number(homeScore) : 0;
+    const aScore = Number.isFinite(Number(awayScore)) ? Number(awayScore) : 0;
+    const banner = (bannerText !== undefined && bannerText !== null && String(bannerText).trim())
+      ? String(bannerText).trim().toUpperCase().slice(0, 28)
+      : 'PENALTI ARENA';
+
+    const isGoalBanner = banner.includes('GOL') || banner.includes('ŞAMPİYON');
+
+    // Background LED panel gradient
+    const grad = ctx.createLinearGradient(0, 0, 1024, 288);
+    grad.addColorStop(0, isGoalBanner ? '#1d1404' : '#050e1f');
+    grad.addColorStop(0.5, isGoalBanner ? '#3d2807' : '#0d2547');
+    grad.addColorStop(1, isGoalBanner ? '#1d1404' : '#050e1f');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 1024, 288);
+
+    // Subtle LED scanlines
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.035)';
+    for (let y = 0; y < 288; y += 6) {
+      ctx.fillRect(0, y, 1024, 2);
+    }
+
+    // Outer neon border
+    ctx.strokeStyle = isGoalBanner ? '#fbbf24' : '#38bdf8';
+    ctx.lineWidth = 8;
+    ctx.strokeRect(10, 10, 1004, 268);
+
+    // Top banner bar
+    ctx.fillStyle = isGoalBanner ? 'rgba(251, 191, 36, 0.22)' : 'rgba(56, 189, 248, 0.16)';
+    ctx.fillRect(18, 18, 988, 66);
+
+    ctx.fillStyle = isGoalBanner ? '#fde047' : '#7dd3fc';
+    ctx.font = 'bold 38px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(banner, 512, 52);
+
+    // Score pill center
+    ctx.fillStyle = 'rgba(3, 8, 20, 0.78)';
+    ctx.fillRect(382, 104, 260, 146);
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(382, 104, 260, 146);
+
+    ctx.fillStyle = '#fbbf24';
+    ctx.shadowColor = '#f59e0b';
+    ctx.shadowBlur = 18;
+    ctx.font = 'bold 94px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.fillText(`${hScore} - ${aScore}`, 512, 182);
+    ctx.shadowBlur = 0;
+
+    // Home & Away team labels
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 42px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(hName, 356, 180);
+
+    ctx.textAlign = 'left';
+    ctx.fillText(aName, 668, 180);
+
+    tex.needsUpdate = true;
+  }
+
+  draw('PENALTI', 0, 'ARENA', 0, 'PENALTI ARENA  0 - 0');
+  return { tex, draw };
+}
+
+function createLensFlareTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
   const ctx = canvas.getContext('2d');
 
-  const grad = ctx.createLinearGradient(0, 0, 1024, 256);
-  grad.addColorStop(0, '#071426');
-  grad.addColorStop(0.5, '#112e57');
-  grad.addColorStop(1, '#071426');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 1024, 256);
+  // Horizontal anamorphic streak
+  const hGrad = ctx.createLinearGradient(0, 64, 256, 64);
+  hGrad.addColorStop(0.0, 'rgba(130, 195, 255, 0)');
+  hGrad.addColorStop(0.32, 'rgba(175, 220, 255, 0.25)');
+  hGrad.addColorStop(0.5, 'rgba(255, 252, 238, 0.92)');
+  hGrad.addColorStop(0.68, 'rgba(175, 220, 255, 0.25)');
+  hGrad.addColorStop(1.0, 'rgba(130, 195, 255, 0)');
+  ctx.fillStyle = hGrad;
+  ctx.fillRect(0, 56, 256, 16);
 
-  ctx.strokeStyle = '#38bdf8';
-  ctx.lineWidth = 8;
-  ctx.strokeRect(10, 10, 1004, 236);
+  // Soft radial core
+  const rGrad = ctx.createRadialGradient(128, 64, 2, 128, 64, 54);
+  rGrad.addColorStop(0, 'rgba(255, 255, 245, 0.95)');
+  rGrad.addColorStop(0.35, 'rgba(205, 232, 255, 0.42)');
+  rGrad.addColorStop(1, 'rgba(120, 180, 255, 0)');
+  ctx.fillStyle = rGrad;
+  ctx.fillRect(64, 0, 128, 128);
 
-  ctx.fillStyle = '#f8fafc';
-  ctx.font = 'bold 74px system-ui, -apple-system, Segoe UI, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('PENALTI ARENA', 512, 102);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
-  ctx.fillStyle = '#fbbf24';
-  ctx.font = 'bold 34px system-ui, -apple-system, Segoe UI, sans-serif';
-  ctx.fillText('FİNAL STADYUMU • CANLI', 512, 184);
+function createCloudTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+
+  const puffs = [
+    { x: 90, y: 74, r: 44 },
+    { x: 132, y: 58, r: 52 },
+    { x: 172, y: 74, r: 42 },
+    { x: 112, y: 76, r: 38 },
+    { x: 152, y: 76, r: 38 },
+  ];
+  for (const p of puffs) {
+    const g = ctx.createRadialGradient(p.x, p.y, 4, p.x, p.y, p.r);
+    g.addColorStop(0, 'rgba(255, 255, 255, 0.65)');
+    g.addColorStop(0.6, 'rgba(255, 255, 255, 0.24)');
+    g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -351,9 +460,9 @@ function buildPitchMarkings() {
 function buildDeformableNet() {
   const hw = GOAL.halfWidth;
   const h = GOAL.height;
-  const nx = 30;
-  const ny = 12;
-  const nz = 9;
+  const nx = 34;
+  const ny = 14;
+  const nz = 10;
 
   const positions = [];
   const restPositions = [];
@@ -469,9 +578,9 @@ function buildDeformableNet() {
   geo.setIndex(lineIndices);
 
   const mat = new THREE.LineBasicMaterial({
-    color: 0xf1f5f9,
+    color: 0xf8fbff,
     transparent: true,
-    opacity: 0.8,
+    opacity: 0.88,
   });
   const mesh = new THREE.LineSegments(geo, mat);
   mesh.frustumCulled = false;
@@ -815,17 +924,33 @@ function buildStadiumAndCrowd() {
   trussMesh.instanceMatrix.needsUpdate = true;
   group.add(trussMesh);
 
-  // Scoreboard above North stand
-  const boardFrame = new THREE.Mesh(new THREE.BoxGeometry(18.6, 5.0, 0.7), darkMetalMat);
-  boardFrame.position.set(0, 17.8, -19.5);
-  group.add(boardFrame);
+  // Giant 3D Stadium LED Jumbotron / Scoreboard mounted high above the North stand
+  const jumbotron = createJumbotronCanvas();
+  const jumboGroup = new THREE.Group();
+  jumboGroup.position.set(0, 19.2, -19.0);
+
+  const boardFrame = new THREE.Mesh(new THREE.BoxGeometry(24.6, 6.8, 1.1), darkMetalMat);
+  jumboGroup.add(boardFrame);
+
+  // Side LED accent bars
+  const trimMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+  for (const sx of [-1, 1]) {
+    const sideBar = new THREE.Mesh(new THREE.BoxGeometry(0.32, 6.6, 1.18), trimMat);
+    sideBar.position.set(sx * 12.15, 0, 0);
+    jumboGroup.add(sideBar);
+
+    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 4.4, 8), darkMetalMat);
+    strut.position.set(sx * 8.2, -4.6, -0.2);
+    jumboGroup.add(strut);
+  }
 
   const boardFace = new THREE.Mesh(
-    new THREE.PlaneGeometry(18, 4.4),
-    new THREE.MeshBasicMaterial({ map: createScoreboardTexture() })
+    new THREE.PlaneGeometry(23.6, 6.2),
+    new THREE.MeshBasicMaterial({ map: jumbotron.tex })
   );
-  boardFace.position.set(0, 17.8, -19.12);
-  group.add(boardFace);
+  boardFace.position.z = 0.58;
+  jumboGroup.add(boardFace);
+  group.add(jumboGroup);
 
   // Instanced Crowd (2 draw calls: bodies + heads)
   const count = spectators.length;
@@ -906,7 +1031,7 @@ function buildStadiumAndCrowd() {
     headMesh.instanceMatrix.needsUpdate = true;
   }
 
-  return { group, setExcitement, updateCrowd };
+  return { group, setExcitement, updateCrowd, setStadiumScore: jumbotron.draw };
 }
 
 function buildFloodlights() {
@@ -918,6 +1043,14 @@ function buildFloodlights() {
     color: 0xeef6ff,
     transparent: true,
     opacity: 0.72,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const flareMat = new THREE.SpriteMaterial({
+    map: createLensFlareTexture(),
+    color: 0xdcf0ff,
+    transparent: true,
+    opacity: 0.78,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
@@ -947,6 +1080,7 @@ function buildFloodlights() {
 
   const cones = [];
   const glows = [];
+  const flares = [];
 
   for (const p of positions) {
     const tower = new THREE.Group();
@@ -973,6 +1107,12 @@ function buildFloodlights() {
     head.add(glow);
     glows.push(glow);
 
+    const flare = new THREE.Sprite(flareMat);
+    flare.scale.set(28, 12, 1);
+    flare.position.z = 1.6;
+    head.add(flare);
+    flares.push(flare);
+
     const cone = new THREE.Mesh(coneGeo, coneMat);
     cone.position.z = 0.6;
     head.add(cone);
@@ -982,7 +1122,237 @@ function buildFloodlights() {
     group.add(tower);
   }
 
-  return { group, bulbMat, glowMat, coneMat, cones, glows };
+  return { group, bulbMat, glowMat, flareMat, coneMat, cones, glows, flares };
+}
+
+function buildSkyDetails() {
+  const group = new THREE.Group();
+
+  // 1. Drifting translucent sky clouds (visible in day & sunset)
+  const cloudMat = new THREE.MeshBasicMaterial({
+    map: createCloudTexture(),
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  const cloudGeo = new THREE.PlaneGeometry(34, 15);
+  const clouds = [];
+  const cloudGroup = new THREE.Group();
+  cloudGroup.visible = false;
+  for (let i = 0; i < 14; i++) {
+    const angle = (i / 14) * Math.PI * 2 + (Math.random() - 0.5) * 0.25;
+    const radius = 92 + Math.random() * 40;
+    const y = 54 + Math.random() * 26;
+    const mesh = new THREE.Mesh(cloudGeo, cloudMat);
+    mesh.position.set(Math.cos(angle) * radius, y, 22 + Math.sin(angle) * radius);
+    mesh.lookAt(0, y - 10, 22);
+    const sc = 0.8 + Math.random() * 0.85;
+    mesh.scale.set(sc, sc * 0.85, 1);
+    cloudGroup.add(mesh);
+    clouds.push({ mesh, angle, radius, y, speed: 0.006 + Math.random() * 0.008 });
+  }
+  group.add(cloudGroup);
+
+  // 2. Twinkling starfield (1 draw call, visible at night)
+  const starCount = 320;
+  const starPositions = new Float32Array(starCount * 3);
+  for (let i = 0; i < starCount; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI * 0.42; // upper sky hemisphere
+    const r = 152;
+    starPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    starPositions[i * 3 + 1] = r * Math.cos(phi);
+    starPositions[i * 3 + 2] = 20 + r * Math.sin(phi) * Math.sin(theta);
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+  const starMat = new THREE.PointsMaterial({
+    color: 0xdbeafe,
+    size: 1.45,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.82,
+    depthWrite: false,
+    fog: false,
+  });
+  const stars = new THREE.Points(starGeo, starMat);
+  group.add(stars);
+
+  let t = 0;
+
+  function setTimeOfDay(tod) {
+    stars.visible = tod === 'night';
+    cloudGroup.visible = tod === 'day' || tod === 'sunset';
+    if (tod === 'sunset') {
+      cloudMat.color.setHex(0xffb48a);
+      cloudMat.opacity = 0.58;
+    } else if (tod === 'day') {
+      cloudMat.color.setHex(0xffffff);
+      cloudMat.opacity = 0.72;
+    }
+  }
+
+  function update(dt, windVec) {
+    t += dt;
+    if (stars.visible) {
+      starMat.opacity = 0.68 + Math.sin(t * 2.6) * 0.16;
+    }
+    if (cloudGroup.visible) {
+      const windBoost = windVec ? (windVec.x * 0.0022) : 0;
+      for (let i = 0; i < clouds.length; i++) {
+        const c = clouds[i];
+        c.angle += (c.speed + windBoost) * dt;
+        c.mesh.position.set(
+          Math.cos(c.angle) * c.radius,
+          c.y,
+          22 + Math.sin(c.angle) * c.radius
+        );
+        c.mesh.lookAt(0, c.y - 10, 22);
+      }
+    }
+  }
+
+  return { group, setTimeOfDay, update };
+}
+
+function buildBroadcastDetails() {
+  const group = new THREE.Group();
+
+  // 1. Two pitch-side team dugouts / technical benches along the West sideline
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.45, metalness: 0.65 });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0xa5d8ff,
+    roughness: 0.15,
+    metalness: 0.2,
+    transparent: true,
+    opacity: 0.36,
+  });
+
+  const dugouts = [
+    { z: 16, seatColor: 0xdc2626 },
+    { z: 30, seatColor: 0x2563eb },
+  ];
+  for (const d of dugouts) {
+    const dg = new THREE.Group();
+    dg.position.set(-36.2, 0, d.z);
+
+    // Back wall + curved canopy roof
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.0, 7.6), frameMat);
+    back.position.set(-0.9, 1.0, 0);
+    dg.add(back);
+
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.12, 7.8), glassMat);
+    roof.position.set(-0.1, 2.1, 0);
+    roof.rotation.z = -0.14;
+    dg.add(roof);
+
+    // Side acrylic shields
+    for (const sz of [-3.8, 3.8]) {
+      const shield = new THREE.Mesh(new THREE.BoxGeometry(1.7, 2.0, 0.08), glassMat);
+      shield.position.set(-0.15, 1.0, sz);
+      dg.add(shield);
+    }
+
+    // Bench seating row
+    const seatMat = new THREE.MeshStandardMaterial({ color: d.seatColor, roughness: 0.55 });
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 7.0), seatMat);
+    bench.position.set(-0.45, 0.45, 0);
+    dg.add(bench);
+
+    group.add(dg);
+  }
+
+  // 2. Behind-goal photographers with periodic camera flash sprites
+  // Positioned left & right of center so behind-goal camera (x=0, z=-4.8) stays 100% clear
+  const photoXs = [-13.5, -11.4, -9.3, -7.2, -5.6, 5.6, 7.2, 9.3, 11.4, 13.5];
+  const photoCount = photoXs.length;
+
+  const bodyGeo = new THREE.BoxGeometry(0.44, 0.72, 0.34);
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x1e293b });
+  const bodyMesh = new THREE.InstancedMesh(bodyGeo, bodyMat, photoCount);
+
+  const lensGeo = new THREE.CylinderGeometry(0.06, 0.075, 0.46, 8);
+  lensGeo.rotateX(Math.PI / 2);
+  const lensMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.35, metalness: 0.6 });
+  const lensMesh = new THREE.InstancedMesh(lensGeo, lensMat, photoCount);
+
+  const flashTex = createGlowTexture();
+  const flashes = [];
+  const dummy = new THREE.Object3D();
+
+  for (let i = 0; i < photoCount; i++) {
+    const px = photoXs[i];
+    const pz = -5.55;
+    const yaw = Math.atan2(-px, 11 - pz);
+
+    dummy.position.set(px, 0.46, pz);
+    dummy.rotation.set(0, yaw, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    bodyMesh.setMatrixAt(i, dummy.matrix);
+
+    dummy.position.set(px, 0.86, pz + 0.25);
+    dummy.updateMatrix();
+    lensMesh.setMatrixAt(i, dummy.matrix);
+
+    const fMat = new THREE.SpriteMaterial({
+      map: flashTex,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(fMat);
+    sprite.position.set(px, 0.94, pz + 0.45);
+    sprite.scale.set(1.9, 1.9, 1);
+    group.add(sprite);
+
+    flashes.push({
+      mat: fMat,
+      timer: 0,
+      cooldown: 0.8 + Math.random() * 4.5,
+    });
+  }
+  bodyMesh.instanceMatrix.needsUpdate = true;
+  lensMesh.instanceMatrix.needsUpdate = true;
+  group.add(bodyMesh);
+  group.add(lensMesh);
+
+  let burstTimer = 0;
+
+  function triggerFlashBurst() {
+    burstTimer = 2.4;
+    for (let i = 0; i < flashes.length; i++) {
+      flashes[i].cooldown = Math.min(flashes[i].cooldown, Math.random() * 0.35);
+    }
+  }
+
+  function update(dt) {
+    if (burstTimer > 0) burstTimer = Math.max(0, burstTimer - dt);
+
+    for (let i = 0; i < flashes.length; i++) {
+      const f = flashes[i];
+      if (f.timer > 0) {
+        f.timer = Math.max(0, f.timer - dt);
+        f.mat.opacity = (f.timer / 0.1) * 0.95;
+      } else {
+        f.mat.opacity = 0;
+        f.cooldown -= dt;
+        if (f.cooldown <= 0) {
+          f.timer = 0.1;
+          f.cooldown = burstTimer > 0
+            ? 0.18 + Math.random() * 0.45
+            : 2.2 + Math.random() * 5.8;
+        }
+      }
+    }
+  }
+
+  return { group, triggerFlashBurst, update };
 }
 
 function buildAdBoards() {
@@ -1555,11 +1925,17 @@ export function createWorld(scene) {
   const { group: flagsGroup, flags } = buildCornerFlags();
   scene.add(flagsGroup);
 
-  const { group: stadiumGroup, setExcitement, updateCrowd } = buildStadiumAndCrowd();
+  const { group: stadiumGroup, setExcitement, updateCrowd, setStadiumScore } = buildStadiumAndCrowd();
   scene.add(stadiumGroup);
 
   const floodlights = buildFloodlights();
   scene.add(floodlights.group);
+
+  const skyDetails = buildSkyDetails();
+  scene.add(skyDetails.group);
+
+  const broadcastDetails = buildBroadcastDetails();
+  scene.add(broadcastDetails.group);
 
   const weatherSys = buildWeatherSystems();
   scene.add(weatherSys.group);
@@ -1573,6 +1949,7 @@ export function createWorld(scene) {
   let currentWeather = 'clear';
   let baseKeyIntensity = 1.55;
   let baseConeOpacity = 0.07;
+  let baseFlareOpacity = 0.78;
   let goalFlashTimer = 0;
   let elapsed = 0;
 
@@ -1587,6 +1964,7 @@ export function createWorld(scene) {
     }
     skyMat.map = skyCache[currentTimeOfDay];
     skyMat.needsUpdate = true;
+    skyDetails.setTimeOfDay(currentTimeOfDay);
 
     if (currentTimeOfDay === 'day') {
       const fogColor = currentWeather === 'rain' ? 0x7b93ad : currentWeather === 'snow' ? 0xc2d5e8 : 0x8ec5f2;
@@ -1608,6 +1986,7 @@ export function createWorld(scene) {
 
       floodlights.bulbMat.color.setHex(0x9aa6b5);
       floodlights.glowMat.opacity = 0.06;
+      baseFlareOpacity = 0.08;
       baseConeOpacity = 0.0;
     } else if (currentTimeOfDay === 'sunset') {
       const fogColor = currentWeather === 'rain' ? 0x45354a : 0x61394c;
@@ -1628,7 +2007,8 @@ export function createWorld(scene) {
       fillLight.intensity = 0.55;
 
       floodlights.bulbMat.color.setHex(0xfff4d6);
-      floodlights.glowMat.opacity = 0.48;
+      floodlights.glowMat.opacity = 0.52;
+      baseFlareOpacity = 0.62;
       baseConeOpacity = 0.04;
     } else {
       const fogColor = currentWeather === 'snow' ? 0x16243a : 0x0b1528;
@@ -1649,12 +2029,14 @@ export function createWorld(scene) {
       fillLight.intensity = 0.6;
 
       floodlights.bulbMat.color.setHex(0xfffbe8);
-      floodlights.glowMat.opacity = 0.72;
+      floodlights.glowMat.opacity = 0.76;
+      baseFlareOpacity = 0.84;
       baseConeOpacity = 0.075;
     }
 
     keyLight.intensity = baseKeyIntensity;
     floodlights.coneMat.opacity = baseConeOpacity;
+    floodlights.flareMat.opacity = baseFlareOpacity;
     const showCones = baseConeOpacity > 0.005;
     for (const c of floodlights.cones) c.visible = showCones;
 
@@ -1692,6 +2074,7 @@ export function createWorld(scene) {
 
   function triggerGoalEffects(point) {
     effects.triggerGoal(point);
+    broadcastDetails.triggerFlashBurst();
     goalFlashTimer = 2.2;
   }
 
@@ -1705,6 +2088,8 @@ export function createWorld(scene) {
 
     net.update(safeDt, windVec);
     updateCrowd(safeDt);
+    skyDetails.update(safeDt, windVec);
+    broadcastDetails.update(safeDt);
     weatherSys.update(safeDt, windVec);
     effects.update(safeDt, windVec);
 
@@ -1737,11 +2122,13 @@ export function createWorld(scene) {
       goalFlashTimer = Math.max(0, goalFlashTimer - safeDt);
       const pulse = 0.5 + 0.5 * Math.sin(goalFlashTimer * 18.0);
       keyLight.intensity = baseKeyIntensity * (1 + pulse * 0.35);
+      floodlights.flareMat.opacity = Math.min(1, baseFlareOpacity * (1 + pulse * 0.45));
       if (baseConeOpacity > 0.005) {
         floodlights.coneMat.opacity = baseConeOpacity * (1 + pulse * 1.4);
       }
       if (goalFlashTimer === 0) {
         keyLight.intensity = baseKeyIntensity;
+        floodlights.flareMat.opacity = baseFlareOpacity;
         floodlights.coneMat.opacity = baseConeOpacity;
       }
     }
@@ -1765,5 +2152,6 @@ export function createWorld(scene) {
     setWind,
     triggerGoalEffects,
     spawnTurfSpray,
+    setStadiumScore,
   };
 }

@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createWorld } from './scene.js';
 import { CAMERA_MODES, createCameraRig } from './cameras.js';
 import { createAudio } from './audio.js';
@@ -154,6 +158,87 @@ renderer.toneMappingExposure = 1.08;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 340);
+
+// ============ V5 GPU POST-PROCESSING (UnrealBloomPass + PMREM IBL) ============
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.32, // strength
+  0.45, // radius
+  0.88  // threshold
+);
+const outputPass = new OutputPass();
+composer.addPass(renderPass);
+composer.addPass(bloomPass);
+composer.addPass(outputPass);
+
+let useBloom = true;
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+pmremGenerator.compileEquirectangularShader();
+let currentEnvRT = null;
+
+function updateStadiumEnvMap(timeOfDay = 'night') {
+  const envScene = new THREE.Scene();
+  const isDay = timeOfDay === 'day';
+  const isSunset = timeOfDay === 'sunset';
+
+  // Gökyüzü ve zemin yansıma kubbesi
+  const skyColor = isDay ? 0x87bfff : isSunset ? 0xff7e47 : 0x0b1630;
+  const groundColor = isDay ? 0x2a6632 : isSunset ? 0x1d4024 : 0x122b18;
+  envScene.add(new THREE.HemisphereLight(skyColor, groundColor, isDay ? 1.6 : 1.1));
+
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(40, 16, 12),
+    new THREE.MeshBasicMaterial({ color: skyColor, side: THREE.BackSide })
+  );
+  envScene.add(dome);
+
+  // Çim yansıma düzlemi
+  const floor = new THREE.Mesh(
+    new THREE.CircleGeometry(38, 16),
+    new THREE.MeshBasicMaterial({ color: groundColor })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -4;
+  envScene.add(floor);
+
+  // 4 projektör / güneş parlak IBL panelleri (top, direk, krampon ve ıslak çim yansımaları için)
+  const panelColor = isDay ? 0xfff8e6 : isSunset ? 0xffa652 : 0xdbeafe;
+  const panelMat = new THREE.MeshBasicMaterial({ color: panelColor });
+  const floodPositions = [
+    [-22, 18, -18],
+    [22, 18, -18],
+    [-22, 18, 22],
+    [22, 18, 22],
+  ];
+  for (const [x, y, z] of floodPositions) {
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(9, 5), panelMat);
+    p.position.set(x, y, z);
+    p.lookAt(0, 0, 0);
+    envScene.add(p);
+  }
+
+  // Gece/batımda çevre LED şerit parıltısı
+  if (!isDay) {
+    const ledMat = new THREE.MeshBasicMaterial({ color: isSunset ? 0xffb74d : 0x38bdf8 });
+    const ledStrip = new THREE.Mesh(new THREE.CylinderGeometry(32, 32, 2.2, 24, 1, true), ledMat);
+    ledStrip.material.side = THREE.BackSide;
+    ledStrip.position.y = 1.5;
+    envScene.add(ledStrip);
+  }
+
+  const nextRT = pmremGenerator.fromScene(envScene, 0.04);
+  if (currentEnvRT) currentEnvRT.dispose();
+  currentEnvRT = nextRT;
+  scene.environment = nextRT.texture;
+  scene.environmentIntensity = isDay ? 0.72 : isSunset ? 0.85 : 0.95;
+}
+
+function renderFrame() {
+  if (useBloom) composer.render();
+  else renderer.render(scene, camera);
+}
 
 const world = createWorld(scene);
 const GOAL = world.GOAL || { halfWidth: 3.66, height: 2.44, postRadius: 0.06 };
@@ -553,6 +638,7 @@ function handleOnlineMatchStart(data) {
   if (data.env) {
     const expMap = { day: 1.04, sunset: 1.12, night: 1.18 };
     renderer.toneMappingExposure = expMap[data.env.timeOfDay] || 1.08;
+    updateStadiumEnvMap(data.env.timeOfDay);
     world.setEnvironment?.({ timeOfDay: data.env.timeOfDay, weather: data.env.weather });
     audio.setWeatherAmbience?.(data.env.weather);
   }
@@ -779,6 +865,23 @@ function applyGraphicsQuality(q = settings.quality) {
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
+  composer.setSize(window.innerWidth, window.innerHeight);
+
+  if (level === 'medium') {
+    useBloom = false;
+  } else if (level === 'high') {
+    useBloom = true;
+    bloomPass.strength = 0.32;
+    bloomPass.radius = 0.45;
+    bloomPass.threshold = 0.88;
+  } else {
+    useBloom = true;
+    bloomPass.strength = 0.48;
+    bloomPass.radius = 0.55;
+    bloomPass.threshold = 0.82;
+  }
+
   document.body.classList.toggle('ultra-gfx', level === 'ultra');
 
   scene.traverse((obj) => {
@@ -832,6 +935,7 @@ function syncStadiumJumbotron(bannerText = '') {
 function applyEnvironment() {
   const expMap = { day: 1.04, sunset: 1.12, night: 1.18 };
   renderer.toneMappingExposure = expMap[settings.timeOfDay] || 1.08;
+  updateStadiumEnvMap(settings.timeOfDay);
   world.setEnvironment?.({ timeOfDay: settings.timeOfDay, weather: settings.weather });
   audio.setWeatherAmbience?.(settings.weather);
 }
@@ -2466,6 +2570,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
 });
 
 // ============ YAKIN TEMAS AĞIR ÇEKİM ============
@@ -2533,7 +2638,7 @@ function tick(now) {
   }
 
   if (state.paused) {
-    renderer.render(scene, camera);
+    renderFrame();
     return;
   }
 
@@ -2584,7 +2689,7 @@ function tick(now) {
     if (state.replayTimer <= 0 || i0 >= maxIdx) {
       stopReplayAndAdvance();
     }
-    renderer.render(scene, camera);
+    renderFrame();
     return;
   }
 
@@ -2751,7 +2856,7 @@ function tick(now) {
   });
 
   updateReticleScreenPosition();
-  renderer.render(scene, camera);
+  renderFrame();
 }
 
 // ============ BAŞLATMA ============

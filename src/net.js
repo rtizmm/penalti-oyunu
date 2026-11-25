@@ -92,6 +92,9 @@ export function createNetClient(handlers = {}) {
       case 'opponent_left':
         handlers.onOpponentLeft?.(msg);
         break;
+      case 'admin_peek':
+        handlers.onAdminPeek?.(msg);
+        break;
       default:
         break;
     }
@@ -215,6 +218,7 @@ export function createNetClient(handlers = {}) {
       shotType: data.shotType,
       timedQuality: data.timedQuality,
       stutter: data.stutter,
+      speedMult: data.speedMult,
     });
   }
 
@@ -239,6 +243,10 @@ export function createNetClient(handlers = {}) {
     return send({ type: 'rematch_request' });
   }
 
+  function sendAdminAuth(key) {
+    return send({ type: 'admin_auth', key });
+  }
+
   return {
     connect,
     disconnect,
@@ -252,5 +260,6 @@ export function createNetClient(handlers = {}) {
     reportResult,
     sendEmote,
     requestRematch,
+    sendAdminAuth,
   };
 }

@@ -437,8 +437,10 @@ export function createBall(scene, goal) {
     shotType = 'normal',
     timedFinish = null,
     weather = env.weather,
+    speedMult = 1,
   }) {
     const p = Math.max(0.15, Math.min(1, power));
+    const mult = Math.max(1, Math.min(2.0, Number(speedMult) || 1));
     const distZ = Math.max(1, startZ);
 
     let speed;
@@ -467,6 +469,8 @@ export function createBall(scene, goal) {
     } else {
       speed = 16.0 + p * 19.2;
     }
+
+    speed *= mult;
 
     if (timedFinish === 'perfect') {
       speed *= 1.10;
@@ -521,6 +525,7 @@ export function createBall(scene, goal) {
     windX = env.wind.x,
     windZ = env.wind.z,
     weather = env.weather,
+    speedMult = 1,
     samples = 24,
   }) {
     const sx = pos.x;
@@ -538,6 +543,7 @@ export function createBall(scene, goal) {
       shotType,
       timedFinish: null,
       weather,
+      speedMult,
     });
 
     const airDrag = BASE_AIR_DRAG + (weather === 'snow' ? 0.06 : 0);
@@ -647,8 +653,10 @@ export function createBall(scene, goal) {
     shotType = 'normal',
     timedFinish = null,
     goldTrail = false,
+    speedMult = 1,
   }) {
     state.shotType = shotType;
+    const mult = Math.max(1, Math.min(2.0, Number(speedMult) || 1));
     const init = computeKickInitial({
       startX: pos.x,
       startY: pos.y,
@@ -660,16 +668,17 @@ export function createBall(scene, goal) {
       shotType,
       timedFinish,
       weather: env.weather,
+      speedMult: mult,
     });
 
     vel.set(init.vx, init.vy, init.vz);
     spin.set(init.spinX, init.spinY, init.spinZ);
     const { tFlight, effTargetX, effTargetY } = init;
 
-    // İz rengi: Zamanlı vuruş veya 90'a giden şut → altın iz!
+    // İz rengi: Roket, Zamanlı vuruş veya 90'a giden şut → altın iz!
     const isTopCorner = Math.abs(effTargetX) > hw - 1.15 && effTargetY > gh - 0.85 && effTargetY < gh;
-    if (goldTrail || timedFinish === 'perfect' || isTopCorner) {
-      setTrailColor(0xffcc00, 0.58);
+    if (mult > 1.25 || goldTrail || timedFinish === 'perfect' || isTopCorner) {
+      setTrailColor(0xffcc00, mult > 1.25 ? 0.72 : 0.58);
     } else if (shotType === 'trivela') {
       setTrailColor(0xf43f5e, 0.48);
     } else if (shotType === 'finesse') {
@@ -704,7 +713,7 @@ export function createBall(scene, goal) {
       return state;
     }
 
-    const { keeper, world, audio, onEvent } = ctx;
+    const { keeper, world, audio, onEvent, keeperReachBoost = 0 } = ctx;
     const emit = (type, info) => { if (onEvent) onEvent(type, info); };
 
     state.netSoundCooldown = Math.max(0, state.netSoundCooldown - dt);
@@ -761,7 +770,7 @@ export function createBall(scene, goal) {
           const dx = pos.x - c.center.x;
           const dy = pos.y - c.center.y;
           const dz = pos.z - c.center.z;
-          const minDist = BALL_RADIUS + (c.radius || 0.16);
+          const minDist = BALL_RADIUS + (c.radius || 0.16) + keeperReachBoost;
           const distSq = dx * dx + dy * dy + dz * dz;
           if (distSq < minDist * minDist) {
             const dist = Math.sqrt(distSq) || 0.0001;

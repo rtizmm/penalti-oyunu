@@ -15,6 +15,7 @@ import {
   SHOT_TYPES,
   DIFFICULTIES,
   getDifficulty,
+  classifyShot,
   decideAiKeeperDive,
   planAiShot,
   adaptAiShotForEarlyDive,
@@ -141,6 +142,10 @@ const ui = {
   onlineTimerFill: $('onlineTimerFill'),
   emoteBar: $('emoteBar'),
   emoteFloat: $('emoteFloat'),
+  creatorMark: $('creatorMark'),
+  adminPeekBadge: $('adminPeekBadge'),
+  adminPanel: $('adminPanel'),
+  btnCloseAdmin: $('btnCloseAdmin'),
 };
 
 // ============ THREE.JS KURULUMU ============
@@ -329,14 +334,15 @@ function updateTrajectoryPreview(nowSec) {
       : 0.72;
 
   const pred = ball.predictTrajectory({
-    aimX: state.aimX,
-    aimY: state.aimY,
-    power: previewPower,
-    curl: state.curl,
+    aimX: cheats.auto90 ? (state.aimX >= 0 ? 3.28 : -3.28) : state.aimX,
+    aimY: cheats.auto90 ? 2.18 : state.aimY,
+    power: cheats.auto90 ? 0.76 : previewPower,
+    curl: cheats.auto90 ? 0 : state.curl,
     shotType: state.shotType,
     windX: windVec.x,
     windZ: windVec.z,
     weather: settings.weather,
+    speedMult: cheats.rocket ? 1.8 : 1,
     samples: TRAJ_SAMPLES,
   });
 
@@ -614,6 +620,57 @@ const state = {
   shouldReplay: false,
 };
 
+// ============ GİZLİ YAPIMCI PANELİ (EMIRGREYRAT) ============
+const cheats = {
+  auto90: false,
+  rocket: false,
+  godKeeper: false,
+  peekOnline: false,
+  matrix: false,
+  lastPeek: null,
+};
+
+function clearAdminPeekBadge() {
+  cheats.lastPeek = null;
+  ui.adminPeekBadge.classList.add('hidden');
+  ui.adminPeekBadge.textContent = '';
+}
+
+function sendAdminAuthIfNeeded() {
+  if ((cheats.peekOnline || cheats.godKeeper) && netClient && netClient.isConnected()) {
+    netClient.sendAdminAuth?.('emirgreyrat');
+  }
+}
+
+function formatPeekLabel(data) {
+  if (!data) return '';
+  const hTxt = data.height === 'high' ? 'ÜST' : 'ALT';
+  if (data.role === 'shooter') {
+    // Sen kalecisin: dünya 'left'(-x) = kalecinin SAĞI, 'right'(+x) = kalecinin SOLU
+    if (data.dir === 'center') return `• ORTA ${hTxt}`;
+    const side = data.dir === 'right' ? 'SOL' : 'SAĞ';
+    return `• ${side} ${hTxt}`;
+  }
+  // Sen penaltıcısın: dünya 'left'(-x) = penaltıcının SOLU, 'right'(+x) = penaltıcının SAĞI
+  if (data.dir === 'center') return `• KALECİ: ORTA`;
+  const side = data.dir === 'left' ? 'SOL' : 'SAĞ';
+  return `• KALECİ: ${side} ${hTxt}`;
+}
+
+function toggleAdminPanel() {
+  ui.adminPanel.classList.toggle('hidden');
+}
+
+function syncAdminPanelUI() {
+  ui.adminPanel.querySelectorAll('.ap-toggle').forEach((btn) => {
+    const k = btn.dataset.cheat;
+    const on = !!cheats[k];
+    btn.classList.toggle('on', on);
+    const st = btn.querySelector('.ap-st');
+    if (st) st.textContent = on ? 'AÇIK' : 'KAPALI';
+  });
+}
+
 // ============ ONLINE 1v1 DURUMU (V3) ============
 const online = {
   active: false,
@@ -668,6 +725,7 @@ function getNetClient() {
       ui.netStatus.textContent = '● Çevrimiçi';
       ui.netStatus.className = 'net-status-pill ok';
       showLobbyError('');
+      sendAdminAuthIfNeeded();
     },
     onClose() {
       ui.netStatus.textContent = 'Bağlantı kesildi';
@@ -725,10 +783,39 @@ function getNetClient() {
     onOpponentLeft({ message }) {
       if (!online.active) return;
       online.active = false;
+      clearAdminPeekBadge();
       ui.onlineTimerBar.classList.add('hidden');
       ui.emoteBar.classList.add('hidden');
       ui.netHudPing.classList.add('hidden');
       finishMatch('🔌', 'RAKİP AYRILDI', `${state.userScore} - ${state.aiScore}`, message || 'Rakip bağlantıyı kesti.', false);
+    },
+    onAdminPeek(data) {
+      cheats.lastPeek = data;
+      if (cheats.peekOnline) {
+        ui.adminPeekBadge.textContent = formatPeekLabel(data);
+        ui.adminPeekBadge.classList.remove('hidden');
+      }
+      if (
+        cheats.godKeeper &&
+        online.active &&
+        state.phase === 'aim' &&
+        state.userRole === 'keeper' &&
+        !online.picked &&
+        data &&
+        data.role === 'shooter'
+      ) {
+        online.picked = true;
+        state.userKeeperDived = true;
+        state.userKeeperDir = data.dir || 'center';
+        state.userKeeperHeight = data.height || 'low';
+        ui.keeperPad.querySelectorAll('.kp-btn').forEach((b) => { b.disabled = true; });
+        ui.onlineStatusText.textContent = 'Başlıyor…';
+        getNetClient().commitDive({
+          turnId: online.turnId,
+          dir: state.userKeeperDir,
+          height: state.userKeeperHeight,
+        });
+      }
     },
   });
   return netClient;
@@ -842,6 +929,8 @@ function syncOnlineScores(scores, history, suddenDeath) {
 
 function startOnlineTurn(turn) {
   if (!turn) return;
+  clearAdminPeekBadge();
+  sendAdminAuthIfNeeded();
   online.turnId = turn.turnId;
   online.round = turn.round || 1;
   online.shooterSide = turn.shooterSide;
@@ -895,6 +984,7 @@ function startOnlineTurn(turn) {
 function handleOnlineExecuteTurn({ turnId, shot, dive, windX }) {
   if (!online.active || turnId !== online.turnId) return;
   if (state.phase !== 'aim') return;
+  clearAdminPeekBadge();
 
   ui.onlineTimerBar.classList.add('hidden');
   ui.reticle.classList.add('hidden');
@@ -919,7 +1009,8 @@ function handleOnlineExecuteTurn({ turnId, shot, dive, windX }) {
     curl: Number(s.curl) || 0,
     shotType: s.shotType || 'normal',
     timedFinish: null,
-    goldTrail: false,
+    goldTrail: Number(s.speedMult) > 1.25,
+    speedMult: Math.max(1, Math.min(2.0, Number(s.speedMult) || 1)),
   };
 
   state.phase = 'runup';
@@ -1656,7 +1747,26 @@ function triggerUserShot() {
   if (state.phase !== 'aim' || state.userRole !== 'shooter') return;
   if (online.active && online.picked) return;
   state.charging = false;
-  const p = Math.max(0.18, state.power);
+
+  let finalAimX = state.aimX;
+  let finalAimY = state.aimY;
+  let finalPower = Math.max(0.18, state.power);
+  let finalCurl = state.curl;
+  let forcePerfect = false;
+  const speedMult = cheats.rocket ? 1.8 : 1;
+
+  if (cheats.auto90) {
+    let sideSign = state.aimX >= 0 ? 1 : -1;
+    if (online.active && cheats.lastPeek && cheats.lastPeek.role === 'keeper') {
+      if (cheats.lastPeek.dir === 'left') sideSign = 1;
+      else if (cheats.lastPeek.dir === 'right') sideSign = -1;
+    }
+    finalAimX = sideSign * 3.28;
+    finalAimY = 2.18;
+    finalPower = 0.76;
+    finalCurl = 0;
+    forcePerfect = true;
+  }
 
   // Online 1v1: şutu sunucuya kilitle, rakip kaleciyi bekle
   if (online.active) {
@@ -1667,23 +1777,26 @@ function triggerUserShot() {
     ui.onlineStatusText.textContent = online.opponentReady ? 'Başlıyor…' : '⏳ Kaleci bekleniyor…';
     getNetClient().commitShot({
       turnId: online.turnId,
-      aimX: state.aimX,
-      aimY: state.aimY,
-      power: p,
-      curl: state.curl,
+      aimX: finalAimX,
+      aimY: finalAimY,
+      power: finalPower,
+      curl: finalCurl,
       shotType: state.shotType,
-      timedQuality: 'none',
+      timedQuality: forcePerfect ? 'perfect' : 'none',
       stutter: false,
+      speedMult,
     });
     return;
   }
 
   state.lockedShot = {
-    targetX: state.aimX,
-    targetY: state.aimY,
-    power: p,
-    curl: state.curl,
+    targetX: finalAimX,
+    targetY: finalAimY,
+    power: finalPower,
+    curl: finalCurl,
     shotType: state.shotType,
+    speedMult,
+    forcePerfect,
   };
 
   if (settings.mode !== 'local2p' && settings.mode !== 'targets') {
@@ -1711,10 +1824,11 @@ function triggerUserShot() {
     () => {
       if (state.phase !== 'runup') return;
       ui.timedBar.classList.add('hidden');
+      const tf = state.lockedShot.forcePerfect ? 'perfect' : state.timedFinish;
       const shot = {
         ...state.lockedShot,
-        timedFinish: state.timedFinish,
-        goldTrail: state.timedFinish === 'perfect',
+        timedFinish: tf,
+        goldTrail: tf === 'perfect' || (state.lockedShot.speedMult || 1) > 1.25,
       };
       executeKick(shot);
     },
@@ -2440,6 +2554,15 @@ window.addEventListener('keydown', (e) => {
   }
   // Input alanlarında yazarken kısayolları engelle
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+
+  // Gizli 'emir' tuş dizisi ile yapımcı panelini aç/kapat
+  if (e.key && e.key.length === 1 && /^[a-zA-Z]$/.test(e.key)) {
+    secretBuf = (secretBuf + e.key.toLowerCase()).slice(-4);
+    if (secretBuf === 'emir') {
+      secretBuf = '';
+      toggleAdminPanel();
+    }
+  }
   if (code === 'KeyM') {
     settings.muted = !settings.muted;
     localStorage.setItem(STORAGE_MUTE, settings.muted ? '1' : '0');
@@ -2686,6 +2809,32 @@ ui.btnRematch.addEventListener('click', () => {
 });
 
 ui.btnLeaveOnline.addEventListener('click', returnToMenu);
+
+// Gizli yapımcı paneli tetikleyicileri (3 tık / 1.5s veya 'emir' yazımı)
+let secretBuf = '';
+let markClicks = [];
+ui.creatorMark.addEventListener('click', () => {
+  const now = performance.now();
+  markClicks = markClicks.filter((t) => now - t < 1500);
+  markClicks.push(now);
+  if (markClicks.length >= 3) {
+    markClicks = [];
+    toggleAdminPanel();
+  }
+});
+ui.btnCloseAdmin.addEventListener('click', () => ui.adminPanel.classList.add('hidden'));
+ui.adminPanel.querySelectorAll('.ap-toggle').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const k = btn.dataset.cheat;
+    if (!(k in cheats)) return;
+    cheats[k] = !cheats[k];
+    syncAdminPanelUI();
+    if (k === 'peekOnline' || k === 'godKeeper') {
+      if (cheats[k]) sendAdminAuthIfNeeded();
+      if (!cheats.peekOnline) ui.adminPeekBadge.classList.add('hidden');
+    }
+  });
+});
 ui.btnNextStage.addEventListener('click', () => {
   state.tournamentStage = Math.min(TOURNAMENT_STAGES.length - 1, state.tournamentStage + 1);
   startMatch(true);
@@ -2790,7 +2939,7 @@ function tick(now) {
     state.timeScale += (1 - state.timeScale) * Math.min(1, rawDt * 8);
   }
 
-  const dt = rawDt * state.timeScale;
+  const dt = rawDt * state.timeScale * (cheats.matrix ? 0.45 : 1);
   const cfg = getDifficulty(state.activeDifficulty);
 
   if (state.phase === 'replay') {
@@ -2925,12 +3074,22 @@ function tick(now) {
       }
     }
 
+    // Tanrı Modu Kaleci (Offline): YZ şut çeker çekmez tam doğru köşeye otomatik atla
+    if (cheats.godKeeper && !online.active && state.userRole === 'keeper' && !state.userKeeperDived && state.aiShotPlan) {
+      const target = classifyShot(state.aiShotPlan.targetX, state.aiShotPlan.targetY);
+      state.userKeeperDived = true;
+      state.userKeeperDir = target.dir;
+      state.userKeeperHeight = target.height;
+      keeper.dive(target.dir, target.height, 0.38);
+    }
+
     checkCloseCallSlowMo();
 
     ball.step(dt, {
       keeper: keeper.group.visible ? keeper : null,
       world,
       audio,
+      keeperReachBoost: cheats.godKeeper && state.userRole === 'keeper' ? 0.34 : 0,
       onEvent: (type, info) => {
         if (type === 'goal') resolveKick('goal', info);
         else if (type === 'save') resolveKick('save', info);

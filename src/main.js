@@ -250,6 +250,144 @@ const keeper = createKeeper(scene, { color: 0x00bcd4 });
 const shooter = createShooter(scene, { color: 0xd32f2f });
 const ball = createBall(scene, GOAL);
 
+// ============ CANLI KAVİSLİ YÖRÜNGE + KALE DÜZLEMİ İNİŞ İŞARETÇİSİ ============
+const TRAJ_SAMPLES = 24;
+const TRAJ_BEADS = 22;
+const trajGroup = new THREE.Group();
+trajGroup.visible = false;
+scene.add(trajGroup);
+
+const trajBeadMat = new THREE.MeshBasicMaterial({
+  color: 0x22d3ee,
+  transparent: true,
+  opacity: 0.82,
+  depthWrite: false,
+});
+const trajBeadMesh = new THREE.InstancedMesh(
+  new THREE.SphereGeometry(0.052, 10, 8),
+  trajBeadMat,
+  TRAJ_BEADS
+);
+trajBeadMesh.frustumCulled = false;
+trajGroup.add(trajBeadMesh);
+
+const trajLinePos = new Float32Array(TRAJ_SAMPLES * 3);
+const trajLineGeo = new THREE.BufferGeometry();
+trajLineGeo.setAttribute('position', new THREE.BufferAttribute(trajLinePos, 3));
+const trajLineMat = new THREE.LineBasicMaterial({
+  color: 0x22d3ee,
+  transparent: true,
+  opacity: 0.45,
+  depthWrite: false,
+});
+const trajLine = new THREE.Line(trajLineGeo, trajLineMat);
+trajLine.frustumCulled = false;
+trajGroup.add(trajLine);
+
+const landingGroup = new THREE.Group();
+const landingRingMat = new THREE.MeshBasicMaterial({
+  color: 0x22d3ee,
+  transparent: true,
+  opacity: 0.92,
+  depthWrite: false,
+});
+const landingRing = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.028, 10, 32), landingRingMat);
+const landingDiscMat = new THREE.MeshBasicMaterial({
+  color: 0x22d3ee,
+  transparent: true,
+  opacity: 0.22,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+});
+const landingDisc = new THREE.Mesh(new THREE.CircleGeometry(0.25, 24), landingDiscMat);
+const landingDot = new THREE.Mesh(
+  new THREE.CircleGeometry(0.062, 16),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false })
+);
+landingDot.position.z = 0.01;
+landingGroup.add(landingRing, landingDisc, landingDot);
+trajGroup.add(landingGroup);
+
+const trajDummy = new THREE.Object3D();
+
+function updateTrajectoryPreview(nowSec) {
+  const show =
+    state.phase === 'aim' &&
+    state.userRole === 'shooter' &&
+    !(online.active && online.picked) &&
+    !(settings.mode === 'local2p' && state.charging);
+
+  if (!show || typeof ball.predictTrajectory !== 'function') {
+    trajGroup.visible = false;
+    return;
+  }
+
+  const previewPower = state.charging
+    ? Math.max(0.18, state.power)
+    : state.shotType === 'panenka'
+      ? 0.55
+      : 0.72;
+
+  const pred = ball.predictTrajectory({
+    aimX: state.aimX,
+    aimY: state.aimY,
+    power: previewPower,
+    curl: state.curl,
+    shotType: state.shotType,
+    windX: windVec.x,
+    windZ: windVec.z,
+    weather: settings.weather,
+    samples: TRAJ_SAMPLES,
+  });
+
+  // Renk kodlaması: 90'a asma = Altın, Kale içi = Turkuaz/Zümrüt, Aut = Kırmızı
+  const hex = !pred.inGoal
+    ? 0xf87171
+    : pred.isTopCorner
+      ? 0xfacc15
+      : state.charging
+        ? 0x34d399
+        : 0x22d3ee;
+
+  trajBeadMat.color.setHex(hex);
+  trajLineMat.color.setHex(hex);
+  landingRingMat.color.setHex(hex);
+  landingDiscMat.color.setHex(hex);
+
+  // Kavisli çizgi + ışıklı boncuklar
+  const pts = pred.points;
+  for (let i = 0; i < TRAJ_SAMPLES; i++) {
+    const p = pts[i] || pts[pts.length - 1];
+    trajLinePos[i * 3] = p.x;
+    trajLinePos[i * 3 + 1] = p.y;
+    trajLinePos[i * 3 + 2] = p.z;
+  }
+  trajLineGeo.attributes.position.needsUpdate = true;
+
+  for (let i = 0; i < TRAJ_BEADS; i++) {
+    const p = pts[i + 1] || pts[pts.length - 1];
+    const frac = i / (TRAJ_BEADS - 1);
+    const pulse = 0.85 + 0.25 * Math.sin(nowSec * 6 - i * 0.45);
+    const scale = (0.65 + frac * 0.55) * pulse;
+    trajDummy.position.copy(p);
+    trajDummy.scale.setScalar(scale);
+    trajDummy.updateMatrix();
+    trajBeadMesh.setMatrixAt(i, trajDummy.matrix);
+  }
+  trajBeadMesh.instanceMatrix.needsUpdate = true;
+
+  // Kale düzlemi son iniş halkası
+  landingGroup.position.set(
+    pred.landing.x,
+    Math.max(0.12, pred.landing.y),
+    0.06
+  );
+  const ringPulse = 1 + Math.sin(nowSec * 5.2) * 0.08;
+  landingGroup.scale.setScalar(ringPulse);
+
+  trajGroup.visible = true;
+}
+
 // ============ AYARLAR & İSTATİSTİKLER ============
 function loadJSON(key, fallback) {
   try {
@@ -2855,6 +2993,7 @@ function tick(now) {
     isReplay: false,
   });
 
+  updateTrajectoryPreview(now * 0.001);
   updateReticleScreenPosition();
   renderFrame();
 }

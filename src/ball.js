@@ -424,6 +424,219 @@ export function createBall(scene, goal) {
   }
 
   /**
+   * Şutun başlangıç hız vektörünü ve spin değerini hesaplar (kick ve predictTrajectory ortak kullanır).
+   */
+  function computeKickInitial({
+    startX,
+    startY,
+    startZ,
+    targetX,
+    targetY,
+    power,
+    curl = 0,
+    shotType = 'normal',
+    timedFinish = null,
+    weather = env.weather,
+  }) {
+    const p = Math.max(0.15, Math.min(1, power));
+    const distZ = Math.max(1, startZ);
+
+    let speed;
+    let effTargetX = targetX;
+    let effTargetY = Math.max(BALL_RADIUS + 0.05, targetY);
+    let effCurl = curl;
+    let overThreshold = 0.85;
+    let extraLoft = 0;
+
+    if (shotType === 'panenka') {
+      speed = 11.2 + p * 3.4;
+      overThreshold = 0.94;
+      extraLoft = 1.05;
+      effTargetY = Math.max(1.25, Math.min(gh - 0.35, targetY + 0.35));
+      effCurl = curl * 0.4;
+    } else if (shotType === 'finesse') {
+      speed = 15.0 + p * 14.2;
+      overThreshold = 0.90;
+      const autoDir = targetX >= 0 ? 0.55 : -0.55;
+      effCurl = Math.max(-1.4, Math.min(1.4, curl * 1.45 + (Math.abs(curl) < 0.15 ? autoDir : 0)));
+    } else if (shotType === 'trivela') {
+      speed = 17.5 + p * 16.5;
+      overThreshold = 0.86;
+      const whip = targetX >= 0 ? 1.15 : -1.15;
+      effCurl = Math.max(-1.6, Math.min(1.6, curl + whip));
+    } else {
+      speed = 16.0 + p * 19.2;
+    }
+
+    if (timedFinish === 'perfect') {
+      speed *= 1.10;
+      overThreshold += 0.05;
+    } else if (timedFinish === 'bad') {
+      effTargetX += (Math.random() - 0.5) * 1.3;
+      effTargetY += (Math.random() - 0.3) * 0.7;
+    }
+
+    if (p > overThreshold) {
+      const over = (p - overThreshold) / Math.max(0.05, 1 - overThreshold);
+      effTargetY += 0.85 + over * 2.5;
+    }
+
+    const dx = effTargetX - startX;
+    const dy = effTargetY - startY;
+    const flatDist = Math.hypot(dx, distZ);
+    const tFlight = flatDist / (speed * 0.91);
+
+    const spinY = effCurl * 17.5;
+    const lateralCurveShift = 0.5 * (MAGNUS_COEFF * spinY * (-distZ / tFlight)) * tFlight * tFlight * 0.17;
+
+    const airDrag = BASE_AIR_DRAG + (weather === 'snow' ? 0.06 : 0);
+    const vx = (dx - lateralCurveShift) / tFlight;
+    const vz = -distZ / tFlight;
+    const vy = (dy + extraLoft + 0.5 * GRAVITY * tFlight * tFlight) / tFlight;
+
+    const dragBoost = 1 + airDrag * tFlight * 0.44;
+    return {
+      vx: vx * dragBoost,
+      vy: vy * (1 + airDrag * tFlight * 0.24),
+      vz: vz * dragBoost,
+      spinX: shotType === 'panenka' ? 14 : -speed * 0.9,
+      spinY,
+      spinZ: -vx * 0.4,
+      tFlight,
+      effTargetX,
+      effTargetY,
+    };
+  }
+
+  /**
+   * Topun gerçek fizik parametreleriyle (yerçekimi, hava direnci, Magnus falso, rüzgar, şut tipi)
+   * kale düzlemine (z = 0) kadar izleyeceği kavisli yörüngeyi simüle eder.
+   */
+  function predictTrajectory({
+    aimX,
+    aimY,
+    power,
+    curl = 0,
+    shotType = 'normal',
+    windX = env.wind.x,
+    windZ = env.wind.z,
+    weather = env.weather,
+    samples = 24,
+  }) {
+    const sx = pos.x;
+    const sy = Math.max(BALL_RADIUS, pos.y);
+    const sz = Math.max(1, pos.z);
+
+    const init = computeKickInitial({
+      startX: sx,
+      startY: sy,
+      startZ: sz,
+      targetX: aimX,
+      targetY: aimY,
+      power,
+      curl,
+      shotType,
+      timedFinish: null,
+      weather,
+    });
+
+    const airDrag = BASE_AIR_DRAG + (weather === 'snow' ? 0.06 : 0);
+    const bounceRestitution = weather === 'rain' ? 0.62 : weather === 'snow' ? 0.44 : 0.52;
+    const groundFriction = weather === 'rain' ? 1.35 : weather === 'snow' ? 3.2 : 2.2;
+
+    let px = sx, py = sy, pz = sz;
+    let vx = init.vx, vy = init.vy, vz = init.vz;
+    let spinY = init.spinY;
+
+    const h = 1 / 120;
+    const maxSteps = 300; // 2.5 sn
+    const rawPts = [new THREE.Vector3(px, py, pz)];
+    let landX = aimX;
+    let landY = aimY;
+    let crossed = false;
+
+    for (let i = 0; i < maxSteps; i++) {
+      const prevX = px, prevY = py, prevZ = pz;
+
+      vy -= GRAVITY * h;
+      const drag = Math.exp(-airDrag * h);
+      vx *= drag;
+      vy *= drag;
+      vz *= drag;
+
+      if (py > BALL_RADIUS + 0.04) {
+        vx += windX * 0.42 * h;
+        vz += windZ * 0.25 * h;
+      }
+      if (Math.abs(spinY) > 0.01 && py > BALL_RADIUS + 0.02) {
+        vx += MAGNUS_COEFF * spinY * (-vz) * 0.088 * h;
+        spinY *= Math.exp(-0.32 * h);
+      }
+
+      px += vx * h;
+      py += vy * h;
+      pz += vz * h;
+
+      if (py < BALL_RADIUS) {
+        py = BALL_RADIUS;
+        if (vy < -0.6) {
+          vy = -vy * bounceRestitution;
+          const slip = weather === 'rain' ? 0.94 : 0.82;
+          vx *= slip;
+          vz *= slip;
+        } else {
+          vy = 0;
+          const fric = Math.exp(-groundFriction * h);
+          vx *= fric;
+          vz *= fric;
+        }
+      }
+
+      if (prevZ >= 0 && pz <= 0) {
+        const denom = prevZ - pz;
+        const t = denom > 1e-6 ? prevZ / denom : 0;
+        landX = prevX + (px - prevX) * t;
+        landY = prevY + (py - prevY) * t;
+        rawPts.push(new THREE.Vector3(landX, Math.max(BALL_RADIUS, landY), 0));
+        crossed = true;
+        break;
+      }
+
+      rawPts.push(new THREE.Vector3(px, py, pz));
+    }
+
+    if (!crossed) {
+      landX = px;
+      landY = py;
+    }
+
+    // Eşit aralıklı örnekleme
+    const points = [];
+    const lastIdx = rawPts.length - 1;
+    const count = Math.max(2, samples);
+    for (let i = 0; i < count; i++) {
+      const f = (i / (count - 1)) * lastIdx;
+      const idx0 = Math.floor(f);
+      const idx1 = Math.min(lastIdx, idx0 + 1);
+      const alpha = f - idx0;
+      points.push(new THREE.Vector3().lerpVectors(rawPts[idx0], rawPts[idx1], alpha));
+    }
+
+    const insideX = Math.abs(landX) <= hw - pr * 0.6;
+    const overBar = landY > gh - pr * 0.6;
+    const inGoal = insideX && !overBar && landY >= 0;
+    const isTopCorner = inGoal && Math.abs(landX) > hw - 1.15 && landY > gh - 0.85;
+
+    return {
+      points,
+      landing: { x: landX, y: Math.max(BALL_RADIUS, landY), z: 0 },
+      inGoal,
+      overBar,
+      isTopCorner,
+    };
+  }
+
+  /**
    * Topa şut çeker (v2: shotType, timedFinish, wind/weather uyumlu).
    */
   function kick({
@@ -435,73 +648,23 @@ export function createBall(scene, goal) {
     timedFinish = null,
     goldTrail = false,
   }) {
-    const p = Math.max(0.15, Math.min(1, power));
-    const distZ = Math.max(1, pos.z);
     state.shotType = shotType;
+    const init = computeKickInitial({
+      startX: pos.x,
+      startY: pos.y,
+      startZ: pos.z,
+      targetX,
+      targetY,
+      power,
+      curl,
+      shotType,
+      timedFinish,
+      weather: env.weather,
+    });
 
-    let speed;
-    let effTargetX = targetX;
-    let effTargetY = Math.max(BALL_RADIUS + 0.05, targetY);
-    let effCurl = curl;
-    let overThreshold = 0.85;
-    let extraLoft = 0;
-
-    if (shotType === 'panenka') {
-      // Panenka: yavaş, yüksekten süzülen aşırtma
-      speed = 11.2 + p * 3.4;
-      overThreshold = 0.94;
-      extraLoft = 1.05;
-      effTargetY = Math.max(1.25, Math.min(gh - 0.35, targetY + 0.35));
-      effCurl = curl * 0.4;
-    } else if (shotType === 'finesse') {
-      // Plase: daha kontrollü hız, ekstra kavis ve isabet
-      speed = 15.0 + p * 14.2;
-      overThreshold = 0.90;
-      const autoDir = targetX >= 0 ? 0.55 : -0.55;
-      effCurl = Math.max(-1.4, Math.min(1.4, curl * 1.45 + (Math.abs(curl) < 0.15 ? autoDir : 0)));
-    } else if (shotType === 'trivela') {
-      // Trivela: ayak dışı sert ve dramatik ters kavis
-      speed = 17.5 + p * 16.5;
-      overThreshold = 0.86;
-      const whip = targetX >= 0 ? 1.15 : -1.15;
-      effCurl = Math.max(-1.6, Math.min(1.6, curl + whip));
-    } else {
-      // Normal şut
-      speed = 16.0 + p * 19.2;
-    }
-
-    // Zamanlı Vuruş (Timed Finishing) bonusu
-    if (timedFinish === 'perfect') {
-      speed *= 1.10;
-      overThreshold += 0.05;
-    } else if (timedFinish === 'bad') {
-      effTargetX += (Math.random() - 0.5) * 1.3;
-      effTargetY += (Math.random() - 0.3) * 0.7;
-    }
-
-    // Aşırı güç üst direğin üzerinden auta gönderir
-    if (p > overThreshold) {
-      const over = (p - overThreshold) / Math.max(0.05, 1 - overThreshold);
-      effTargetY += 0.85 + over * 2.5;
-    }
-
-    const dx = effTargetX - pos.x;
-    const dy = effTargetY - pos.y;
-    const flatDist = Math.hypot(dx, distZ);
-    const tFlight = flatDist / (speed * 0.91);
-
-    const spinY = effCurl * 17.5;
-    // Falso kavisini başlangıç açısıyla kısmen telafi et ki top kavis çizip hedefe otursun
-    const lateralCurveShift = 0.5 * (MAGNUS_COEFF * spinY * (-distZ / tFlight)) * tFlight * tFlight * 0.17;
-
-    const airDrag = BASE_AIR_DRAG + (env.weather === 'snow' ? 0.06 : 0);
-    const vx = (dx - lateralCurveShift) / tFlight;
-    const vz = -distZ / tFlight;
-    const vy = (dy + extraLoft + 0.5 * GRAVITY * tFlight * tFlight) / tFlight;
-
-    const dragBoost = 1 + airDrag * tFlight * 0.44;
-    vel.set(vx * dragBoost, vy * (1 + airDrag * tFlight * 0.24), vz * dragBoost);
-    spin.set(shotType === 'panenka' ? 14 : -speed * 0.9, spinY, -vx * 0.4);
+    vel.set(init.vx, init.vy, init.vz);
+    spin.set(init.spinX, init.spinY, init.spinZ);
+    const { tFlight, effTargetX, effTargetY } = init;
 
     // İz rengi: Zamanlı vuruş veya 90'a giden şut → altın iz!
     const isTopCorner = Math.abs(effTargetX) > hw - 1.15 && effTargetY > gh - 0.85 && effTargetY < gh;
@@ -775,6 +938,7 @@ export function createBall(scene, goal) {
     setTrailColor,
     setReplayPose,
     clearTrail,
+    predictTrajectory,
     reset,
     kick,
     step,

@@ -438,9 +438,11 @@ export function createBall(scene, goal) {
     timedFinish = null,
     weather = env.weather,
     speedMult = 1,
+    curlMult = 1,
   }) {
     const p = Math.max(0.15, Math.min(1, power));
     const mult = Math.max(1, Math.min(2.0, Number(speedMult) || 1));
+    const cMult = Math.max(1, Math.min(4.0, Number(curlMult) || 1));
     const distZ = Math.max(1, startZ);
 
     let speed;
@@ -470,6 +472,7 @@ export function createBall(scene, goal) {
       speed = 16.0 + p * 19.2;
     }
 
+    effCurl *= cMult;
     speed *= mult;
 
     if (timedFinish === 'perfect') {
@@ -526,6 +529,7 @@ export function createBall(scene, goal) {
     windZ = env.wind.z,
     weather = env.weather,
     speedMult = 1,
+    curlMult = 1,
     samples = 24,
   }) {
     const sx = pos.x;
@@ -544,6 +548,7 @@ export function createBall(scene, goal) {
       timedFinish: null,
       weather,
       speedMult,
+      curlMult,
     });
 
     const airDrag = BASE_AIR_DRAG + (weather === 'snow' ? 0.06 : 0);
@@ -654,6 +659,7 @@ export function createBall(scene, goal) {
     timedFinish = null,
     goldTrail = false,
     speedMult = 1,
+    curlMult = 1,
   }) {
     state.shotType = shotType;
     const mult = Math.max(1, Math.min(2.0, Number(speedMult) || 1));
@@ -669,6 +675,7 @@ export function createBall(scene, goal) {
       timedFinish,
       weather: env.weather,
       speedMult: mult,
+      curlMult,
     });
 
     vel.set(init.vx, init.vy, init.vz);
@@ -713,7 +720,17 @@ export function createBall(scene, goal) {
       return state;
     }
 
-    const { keeper, world, audio, onEvent, keeperReachBoost = 0 } = ctx;
+    const {
+      keeper,
+      world,
+      audio,
+      onEvent,
+      keeperReachBoost = 0,
+      keeperDiveInfo = null,
+      godSave = false,
+      brickWall = false,
+      homingTarget = null,
+    } = ctx;
     const emit = (type, info) => { if (onEvent) onEvent(type, info); };
 
     state.netSoundCooldown = Math.max(0, state.netSoundCooldown - dt);
@@ -757,12 +774,63 @@ export function createBall(scene, goal) {
         spin.y *= Math.exp(-0.32 * h);
       }
 
+      // Top Mıknatısı (homing): kale içi açık köşeye doğru yumuşak güdümlü kavis
+      if (homingTarget && !state.inGoal && !state.saved && pos.z > 0.12 && vel.z < -1.0) {
+        const tRem = Math.max(0.06, pos.z / (-vel.z));
+        const desiredVx = (homingTarget.x - pos.x) / tRem;
+        const desiredVy = (homingTarget.y - pos.y + 0.5 * GRAVITY * tRem * tRem) / tRem;
+        const steer = Math.min(1, 9.5 * h);
+        vel.x += (desiredVx - vel.x) * steer;
+        vel.y += (desiredVy - vel.y) * steer;
+      }
+
       // Konum güncelle
       pos.x += vel.x * h;
       pos.y += vel.y * h;
       pos.z += vel.z * h;
 
-      // 1) Kaleci kurtarışı
+      // 0) Görünmez Kale Duvarı (brickWall) veya Tanrı Modu Kaleci (godSave) garantili kurtarış
+      if (!state.saved && !state.inGoal && (brickWall || godSave)) {
+        const zMin = -0.25;
+        const zMax = brickWall ? 0.45 : 0.55;
+        const inGoalOpening = Math.abs(pos.x) <= hw + 0.12 && pos.y <= gh + 0.12 && pos.y >= 0;
+        if (pos.z <= zMax && pos.z >= zMin && inGoalOpening) {
+          pos.z = zMax + 0.02;
+          const spd = Math.max(8, vel.length());
+          if (brickWall) {
+            vel.set((pos.x >= 0 ? 1 : -1) * 2.5, Math.max(3.2, Math.abs(vel.y) * 0.5 + 2.2), Math.max(12, spd * 0.82));
+            world?.spawnTurfSpray?.(pos.clone(), new THREE.Vector3(0, 2.5, 6));
+          } else {
+            const sideBias = (pos.x >= 0 ? 1 : -1) * 0.4;
+            vel.set(sideBias * spd * 0.55, Math.max(2.6, spd * 0.3), Math.max(6.0, spd * 0.52));
+          }
+          spin.multiplyScalar(-0.4);
+          state.saved = true;
+          audio?.save?.();
+          emit('save', { point: pos.clone(), speed: spd, brickWall });
+        }
+      }
+
+      // 1) Kaleci kurtarışı (el/kol/gövde küreleri + Panenka/Merkez yakalama)
+      if (!state.saved && !state.inGoal && keeper && keeperDiveInfo && keeperDiveInfo.dir === 'center') {
+        const kx = keeper.group ? keeper.group.position.x : 0;
+        const curSpeed = vel.length();
+        if (
+          pos.z <= 0.7 &&
+          pos.z >= -0.15 &&
+          Math.abs(pos.x - kx) < 1.35 &&
+          pos.y <= 2.3 &&
+          (keeperDiveInfo.height === 'high' || curSpeed < 18.5)
+        ) {
+          pos.z = 0.72;
+          vel.set((pos.x - kx) * 2.2, Math.max(2.0, curSpeed * 0.28), Math.max(4.5, curSpeed * 0.42));
+          spin.multiplyScalar(-0.3);
+          state.saved = true;
+          audio?.save?.();
+          emit('save', { point: pos.clone(), speed: curSpeed, panenkaSave: true });
+        }
+      }
+
       if (colliders && !state.saved && !state.inGoal && pos.z > -0.35 && pos.z < 2.2) {
         for (let i = 0; i < colliders.length; i++) {
           const c = colliders[i];

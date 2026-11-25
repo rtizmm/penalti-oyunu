@@ -146,6 +146,8 @@ const ui = {
   adminPeekBadge: $('adminPeekBadge'),
   adminPanel: $('adminPanel'),
   btnCloseAdmin: $('btnCloseAdmin'),
+  btnCheatGoal: $('btnCheatGoal'),
+  btnCheatWin: $('btnCheatWin'),
 };
 
 // ============ THREE.JS KURULUMU ============
@@ -343,6 +345,7 @@ function updateTrajectoryPreview(nowSec) {
     windZ: windVec.z,
     weather: settings.weather,
     speedMult: cheats.rocket ? 1.8 : 1,
+    curlMult: cheats.megaCurl ? 3.0 : 1,
     samples: TRAJ_SAMPLES,
   });
 
@@ -627,6 +630,10 @@ const cheats = {
   godKeeper: false,
   peekOnline: false,
   matrix: false,
+  homing: false,
+  megaCurl: false,
+  brickWall: false,
+  clownKeeper: false,
   lastPeek: null,
 };
 
@@ -999,6 +1006,20 @@ function handleOnlineExecuteTurn({ turnId, shot, dive, windX }) {
 
   const s = shot || { aimX: 0, aimY: 1.1, power: 0.65, curl: 0, shotType: 'normal', stutter: false };
   online.execDive = dive || { dir: 'center', height: 'low' };
+  if (cheats.godKeeper && state.userRole === 'keeper' && typeof ball.predictTrajectory === 'function') {
+    const pred = ball.predictTrajectory({
+      aimX: Number(s.aimX) || 0,
+      aimY: Number(s.aimY) || 1.1,
+      power: Number(s.power) || 0.65,
+      curl: Number(s.curl) || 0,
+      shotType: s.shotType || 'normal',
+      windX: wx,
+      windZ: 0,
+      weather: settings.weather,
+      speedMult: Math.max(1, Math.min(2.0, Number(s.speedMult) || 1)),
+    });
+    online.execDive = classifyShot(pred.landing.x, pred.landing.y);
+  }
   online.execDiveTriggered = false;
   online.execDiveTimer = 0;
 
@@ -1796,11 +1817,17 @@ function triggerUserShot() {
     curl: finalCurl,
     shotType: state.shotType,
     speedMult,
+    curlMult: cheats.megaCurl ? 3.0 : 1,
     forcePerfect,
   };
 
   if (settings.mode !== 'local2p' && settings.mode !== 'targets') {
     state.aiKeeperPlan = decideAiKeeperDive(state.activeDifficulty, state.lockedShot, { stuttered: false });
+    if (cheats.clownKeeper) {
+      const trueDir = classifyShot(finalAimX, finalAimY).dir;
+      state.aiKeeperPlan.dir = trueDir === 'left' ? 'right' : trueDir === 'right' ? 'left' : (Math.random() < 0.5 ? 'left' : 'right');
+      state.aiKeeperPlan.height = 'low';
+    }
   } else {
     state.aiKeeperPlan = null;
   }
@@ -2835,6 +2862,49 @@ ui.adminPanel.querySelectorAll('.ap-toggle').forEach((btn) => {
     }
   });
 });
+
+ui.btnCheatGoal.addEventListener('click', () => {
+  if (online.active || state.phase === 'menu' || state.phase === 'ended') return;
+  state.userScore++;
+  state.userResults.push(true);
+  if (settings.mode === 'targets') {
+    state.targetScore += 300;
+    state.targetCombo++;
+  }
+  updateScoreboard();
+  syncStadiumJumbotron('GOL!');
+  audio.goalCheer();
+  world.triggerGoalEffects?.(new THREE.Vector3(0, 1.4, 0));
+  showToast('👑 +1 GOL EKLENDİ!', 1.1);
+});
+
+ui.btnCheatWin.addEventListener('click', () => {
+  if (online.active || state.phase === 'menu' || state.phase === 'ended') return;
+  if (settings.mode === 'tournament') {
+    const stageInfo = TOURNAMENT_STAGES[state.tournamentStage];
+    const hasNext = state.tournamentStage < TOURNAMENT_STAGES.length - 1;
+    state.userScore = Math.max(state.userScore + 1, state.aiScore + 1, 5);
+    updateScoreboard();
+    world.triggerGoalEffects?.(new THREE.Vector3(0, 1.5, 0));
+    audio.pyroPop?.();
+    audio.goalCheer();
+    if (hasNext) {
+      finishMatch('🎉', `${stageInfo.stage.toUpperCase()} GEÇİLDİ!`, `${state.userScore} - ${state.aiScore}`, `${stageInfo.opponent} elendi!`, true);
+    } else {
+      stats.trophies++;
+      saveStats();
+      audio.speak?.('champion');
+      finishMatch('🏆', 'TURNUVA ŞAMPİYONU!', `${state.userScore} - ${state.aiScore}`, `Kupayı kaldırdın! (Toplam Kupa: ${stats.trophies})`, false);
+    }
+  } else {
+    state.userScore = Math.max(state.userScore + 1, state.aiScore + 1, 5);
+    updateScoreboard();
+    world.triggerGoalEffects?.(new THREE.Vector3(0, 1.5, 0));
+    audio.pyroPop?.();
+    audio.goalCheer();
+    finishMatch('🏆', 'ANINDA KAZANDIN!', `${state.userScore} - ${state.aiScore}`, '👑 EMIRGREYRAT zaferi!', false);
+  }
+});
 ui.btnNextStage.addEventListener('click', () => {
   state.tournamentStage = Math.min(TOURNAMENT_STAGES.length - 1, state.tournamentStage + 1);
   startMatch(true);
@@ -3074,25 +3144,71 @@ function tick(now) {
       }
     }
 
-    // Tanrı Modu Kaleci (Offline): YZ şut çeker çekmez tam doğru köşeye otomatik atla
+    // Tanrı Modu Kaleci (Offline): gerçek yörünge iniş noktasını hesaplayıp tam köşeye otomatik atla
     if (cheats.godKeeper && !online.active && state.userRole === 'keeper' && !state.userKeeperDived && state.aiShotPlan) {
-      const target = classifyShot(state.aiShotPlan.targetX, state.aiShotPlan.targetY);
+      const sp = state.aiShotPlan;
+      let lx = sp.targetX;
+      let ly = sp.targetY;
+      if (typeof ball.predictTrajectory === 'function') {
+        const pred = ball.predictTrajectory({
+          aimX: sp.targetX,
+          aimY: sp.targetY,
+          power: sp.power,
+          curl: sp.curl || 0,
+          shotType: sp.shotType || 'normal',
+          windX: windVec.x,
+          windZ: windVec.z,
+          weather: settings.weather,
+        });
+        lx = pred.landing.x;
+        ly = pred.landing.y;
+      }
+      const target = classifyShot(lx, ly);
       state.userKeeperDived = true;
       state.userKeeperDir = target.dir;
       state.userKeeperHeight = target.height;
-      keeper.dive(target.dir, target.height, 0.38);
+      keeper.shuffle(Math.max(-1, Math.min(1, lx * 0.45)));
+      keeper.dive(target.dir, target.height, 0.36);
     }
 
     checkCloseCallSlowMo();
+
+    // Aktif kaleci dalış bilgisi (Panenka / merkez kurtarışları dahil tüm roller için)
+    const activeKeeperDive = online.active
+      ? online.execDive
+      : state.userRole === 'keeper'
+        ? (state.userKeeperDived ? { dir: state.userKeeperDir, height: state.userKeeperHeight } : { dir: 'center', height: 'low' })
+        : state.aiKeeperPlan
+          ? { dir: state.aiKeeperPlan.dir, height: state.aiKeeperPlan.height }
+          : null;
+
+    // Top Mıknatısı hedefi (açık köşeye güdümlü kavis)
+    let homingTarget = null;
+    if (cheats.homing && state.userRole === 'shooter' && !online.active) {
+      const kDir = state.aiKeeperPlan ? state.aiKeeperPlan.dir : 'center';
+      const openSign = kDir === 'left' ? 1 : kDir === 'right' ? -1 : (state.aimX >= 0 ? 1 : -1);
+      homingTarget = { x: openSign * 3.15, y: 2.02 };
+    }
 
     ball.step(dt, {
       keeper: keeper.group.visible ? keeper : null,
       world,
       audio,
-      keeperReachBoost: cheats.godKeeper && state.userRole === 'keeper' ? 0.34 : 0,
+      keeperReachBoost: cheats.godKeeper && state.userRole === 'keeper' ? 0.36 : 0,
+      keeperDiveInfo: activeKeeperDive,
+      godSave: cheats.godKeeper && state.userRole === 'keeper',
+      brickWall: cheats.brickWall && state.userRole === 'keeper',
+      homingTarget,
       onEvent: (type, info) => {
         if (type === 'goal') resolveKick('goal', info);
-        else if (type === 'save') resolveKick('save', info);
+        else if (type === 'save') {
+          if (info && info.brickWall) {
+            world.triggerGoalEffects?.(info.point || new THREE.Vector3(0, 1.2, 0));
+            cameraRig.shake?.(0.38);
+            showToast('🧱 GÖRÜNMEZ DUVAR!', 1.2);
+          }
+          resolveKick('save', info);
+        }
         else if (type === 'post') cameraRig.shake?.(0.32);
         else if (type === 'out') resolveKick(info && info.hitPost ? 'post' : 'miss', info);
       },

@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { createWorld } from './scene.js';
 import { CAMERA_MODES, createCameraRig } from './cameras.js';
 import { createAudio } from './audio.js';
@@ -148,6 +149,21 @@ const ui = {
   btnCloseAdmin: $('btnCloseAdmin'),
   btnCheatGoal: $('btnCheatGoal'),
   btnCheatWin: $('btnCheatWin'),
+  // V6 widgets
+  fpsBadge: $('fpsBadge'),
+  fpsGuard: $('fpsGuard'),
+  btnDropToPotato: $('btnDropToPotato'),
+  btnDropToLow: $('btnDropToLow'),
+  btnDismissFps: $('btnDismissFps'),
+  btnToggleShotMap: $('btnToggleShotMap'),
+  shotMapMini: $('shotMapMini'),
+  shotMapMiniSvg: $('shotMapMiniSvg'),
+  smCount: $('smCount'),
+  endShotMapWrap: $('endShotMapWrap'),
+  endShotMapSvg: $('endShotMapSvg'),
+  commentaryBar: $('commentaryBar'),
+  commentaryText: $('commentaryText'),
+  btnTouchShoot: $('btnTouchShoot'),
 };
 
 // ============ THREE.JS KURULUMU ============
@@ -176,9 +192,75 @@ const bloomPass = new UnrealBloomPass(
   0.88  // threshold
 );
 const outputPass = new OutputPass();
+
+// V6 Özel Sinematik Yayın Shader'ı (Filmic S-Curve + Chromatic Aberration + Mikro Film Greni + Vinyet)
+const BroadcastGradeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uTime: { value: 0 },
+    uImpact: { value: 0 },
+    uWarmth: { value: 0 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    uniform float uImpact;
+    uniform float uWarmth;
+    varying vec2 vUv;
+
+    float rand(vec2 co) {
+      return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    }
+
+    void main() {
+      vec2 center = vUv - 0.5;
+      float dist = length(center);
+      // Kenar kromatik sapması (şut/gol anında uImpact ile güçlenir)
+      vec2 caOffset = center * (0.0014 + uImpact * 0.0052) * dist;
+      float r = texture2D(tDiffuse, clamp(vUv + caOffset, 0.0, 1.0)).r;
+      float g = texture2D(tDiffuse, vUv).g;
+      float b = texture2D(tDiffuse, clamp(vUv - caOffset, 0.0, 1.0)).b;
+      vec3 col = vec3(r, g, b);
+
+      // Filmic S-curve kontrast + hafif doygunluk
+      col = mix(col, col * col * (3.0 - 2.0 * col), 0.24);
+      float lum = dot(col, vec3(0.299, 0.587, 0.114));
+      col = mix(vec3(lum), col, 1.09);
+
+      // Zaman dilimine göre sıcaklık/soğukluk tonu
+      col.r *= (1.0 + uWarmth * 0.45);
+      col.b *= (1.0 - uWarmth * 0.35);
+
+      // Sinematik lens vinyeti
+      float vig = smoothstep(0.98, 0.32, dist);
+      col *= mix(0.68, 1.0, vig);
+
+      // İnce yayın film greni
+      float grain = (rand(vUv + fract(uTime * 0.73)) - 0.5) * 0.016;
+      col = clamp(col + grain, 0.0, 1.0);
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+};
+const gradePass = new ShaderPass(BroadcastGradeShader);
+gradePass.enabled = false;
+
 composer.addPass(renderPass);
 composer.addPass(bloomPass);
 composer.addPass(outputPass);
+composer.addPass(gradePass);
+
+function pulseBroadcastImpact(strength = 0.65) {
+  gradePass.uniforms.uImpact.value = Math.min(1.0, Math.max(gradePass.uniforms.uImpact.value, strength));
+}
 
 let useBloom = true;
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -430,9 +512,10 @@ if (!DIFFICULTIES[settings.difficulty]) settings.difficulty = 'medium';
 if (!CAMERA_MODES.some((m) => m.id === settings.cameraId)) {
   settings.cameraId = (CAMERA_MODES[0] && CAMERA_MODES[0].id) || 'broadcast';
 }
+const VALID_QUALITIES = ['potato', 'low', 'medium', 'high', 'ultra', 'cinematic'];
 if (!TEAM_PRESETS.some((t) => t.id === settings.teamId)) settings.teamId = TEAM_PRESETS[0].id;
 if (!BALL_SKINS.some((s) => s.id === settings.ballSkin)) settings.ballSkin = 'classic';
-if (!['medium', 'high', 'ultra'].includes(settings.quality)) settings.quality = 'high';
+if (!VALID_QUALITIES.includes(settings.quality)) settings.quality = 'high';
 
 const DEFAULT_STATS = {
   totalGoals: 0,
@@ -621,6 +704,14 @@ const state = {
   replayTimer: 0,
   replayPrevCam: null,
   shouldReplay: false,
+  // V6: Vuruş Haritası, Spiker Altyazısı, FPS izleme
+  shotHistory: [],
+  commentaryTimer: 0,
+  fpsAccum: 0,
+  fpsFrames: 0,
+  fpsValue: 60,
+  lowFpsSeconds: 0,
+  fpsGuardDismissed: false,
 };
 
 // ============ GİZLİ YAPIMCI PANELİ (EMIRGREYRAT) ============
@@ -865,6 +956,8 @@ function handleOnlineMatchStart(data) {
   online.side = data.side;
   online.players = data.players;
   online.rematchRequested = false;
+  state.shotHistory = [];
+  updateShotMaps();
 
   // Ev sahibinin ortamını uygula
   if (data.env) {
@@ -1075,6 +1168,8 @@ function advanceOnlineAfterTurn() {
     const oppSide = online.side === 'host' ? 'guest' : 'host';
     const oppName = (online.players && online.players[oppSide] && online.players[oppSide].name) || 'Rakip';
     online.rematchRequested = false;
+  state.shotHistory = [];
+  updateShotMaps();
     ui.btnRematch.textContent = '🔄 RÖVANŞ İSTE';
     if (won) {
       world.triggerGoalEffects?.(new THREE.Vector3(0, 1.5, 0));
@@ -1108,43 +1203,117 @@ const tmpRight = new THREE.Vector3();
 const worldUp = new THREE.Vector3(0, 1, 0);
 
 function applyGraphicsQuality(q = settings.quality) {
-  const level = ['medium', 'high', 'ultra'].includes(q) ? q : 'high';
+  const level = VALID_QUALITIES.includes(q) ? q : 'high';
   settings.quality = level;
-  const maxDpr = level === 'medium' ? 1.25 : level === 'high' ? 1.75 : 2.0;
-  const shadowRes = level === 'medium' ? 1024 : 2048;
 
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
+  const dprMap = {
+    potato: 0.75,
+    low: 1.0,
+    medium: Math.min(window.devicePixelRatio || 1, 1.25),
+    high: Math.min(window.devicePixelRatio || 1, 1.75),
+    ultra: Math.min(window.devicePixelRatio || 1, 2.0),
+    cinematic: Math.min(window.devicePixelRatio || 1, 2.25),
+  };
+  const shadowMap = { potato: 0, low: 512, medium: 1024, high: 2048, ultra: 2048, cinematic: 4096 };
+  const dpr = dprMap[level];
+  const shadowRes = shadowMap[level];
+
+  renderer.shadowMap.enabled = shadowRes > 0;
+  renderer.setPixelRatio(dpr);
   renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
+  composer.setPixelRatio(dpr);
   composer.setSize(window.innerWidth, window.innerHeight);
 
-  if (level === 'medium') {
+  if (level === 'potato' || level === 'low' || level === 'medium') {
     useBloom = false;
+    gradePass.enabled = false;
+    scene.environment = null;
   } else if (level === 'high') {
     useBloom = true;
+    gradePass.enabled = false;
     bloomPass.strength = 0.32;
     bloomPass.radius = 0.45;
     bloomPass.threshold = 0.88;
-  } else {
+    updateStadiumEnvMap(settings.timeOfDay);
+  } else if (level === 'ultra') {
     useBloom = true;
+    gradePass.enabled = false;
     bloomPass.strength = 0.48;
     bloomPass.radius = 0.55;
     bloomPass.threshold = 0.82;
+    updateStadiumEnvMap(settings.timeOfDay);
+  } else {
+    // cinematic ("Ultranın Üstü")
+    useBloom = true;
+    gradePass.enabled = true;
+    bloomPass.strength = 0.52;
+    bloomPass.radius = 0.58;
+    bloomPass.threshold = 0.80;
+    updateStadiumEnvMap(settings.timeOfDay);
   }
 
-  document.body.classList.toggle('ultra-gfx', level === 'ultra');
+  document.body.classList.toggle('ultra-gfx', level === 'ultra' || level === 'cinematic');
 
-  scene.traverse((obj) => {
-    if (obj.isDirectionalLight && obj.castShadow && obj.shadow) {
-      if (obj.shadow.mapSize.x !== shadowRes || obj.shadow.mapSize.y !== shadowRes) {
-        obj.shadow.mapSize.set(shadowRes, shadowRes);
-        if (obj.shadow.map) {
-          obj.shadow.map.dispose();
-          obj.shadow.map = null;
+  world.setGraphicsTier?.(level);
+  world.setShadowResolution?.(shadowRes);
+  keeper.setGraphicsTier?.(level);
+  shooter.setGraphicsTier?.(level);
+  ball.setGraphicsTier?.(level);
+
+  if (shadowRes > 0 && !world.setShadowResolution) {
+    scene.traverse((obj) => {
+      if (obj.isDirectionalLight && obj.castShadow && obj.shadow) {
+        if (obj.shadow.mapSize.x !== shadowRes || obj.shadow.mapSize.y !== shadowRes) {
+          obj.shadow.mapSize.set(shadowRes, shadowRes);
+          if (obj.shadow.map) {
+            obj.shadow.map.dispose();
+            obj.shadow.map = null;
+          }
         }
       }
-    }
+    });
+  }
+}
+
+function showCommentary(text, duration = 3.2) {
+  if (!text) return;
+  ui.commentaryText.textContent = text;
+  ui.commentaryBar.classList.remove('hidden');
+  state.commentaryTimer = duration;
+}
+
+function renderShotMapSvg(svgEl, shots) {
+  if (!svgEl) return;
+  const hw = GOAL.halfWidth || 3.66;
+  const gh = GOAL.height || 2.44;
+  const toY = (worldY) => 2.75 - Math.max(-0.2, Math.min(3.0, worldY));
+
+  let html = '';
+  // Ağ ızgarası
+  for (let x = -3; x <= 3; x += 1) {
+    html += `<line x1="${x}" y1="${toY(gh)}" x2="${x}" y2="${toY(0)}" stroke="rgba(255,255,255,0.12)" stroke-width="0.04"/>`;
+  }
+  for (let y = 0.6; y < gh; y += 0.6) {
+    html += `<line x1="${-hw}" y1="${toY(y)}" x2="${hw}" y2="${toY(y)}" stroke="rgba(255,255,255,0.12)" stroke-width="0.04"/>`;
+  }
+  // Kale çizgisi ve direkler
+  html += `<line x1="-4.2" y1="${toY(0)}" x2="4.2" y2="${toY(0)}" stroke="rgba(255,255,255,0.35)" stroke-width="0.06"/>`;
+  html += `<polyline points="${-hw},${toY(0)} ${-hw},${toY(gh)} ${hw},${toY(gh)} ${hw},${toY(0)}" fill="none" stroke="#ffffff" stroke-width="0.14" stroke-linejoin="round"/>`;
+
+  // Vuruş noktaları
+  shots.forEach((s, idx) => {
+    const cx = Math.max(-4.1, Math.min(4.1, s.x));
+    const cy = toY(s.y);
+    const fill = s.outcome === 'goal' ? '#22c55e' : s.outcome === 'save' ? '#38bdf8' : '#ef4444';
+    html += `<circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="0.21" fill="${fill}" stroke="#ffffff" stroke-width="0.06"/>`;
+    html += `<text x="${cx.toFixed(2)}" y="${(cy + 0.08).toFixed(2)}" text-anchor="middle" fill="#0b1530" font-size="0.22" font-weight="900">${idx + 1}</text>`;
   });
+  svgEl.innerHTML = html;
+}
+
+function updateShotMaps() {
+  ui.smCount.textContent = `${state.shotHistory.length} şut`;
+  renderShotMapSvg(ui.shotMapMiniSvg, state.shotHistory);
 }
 
 function syncStadiumJumbotron(bannerText = '') {
@@ -1184,10 +1353,16 @@ function syncStadiumJumbotron(bannerText = '') {
 // ============ ORTAM, FORMA, RÜZGAR ============
 function applyEnvironment() {
   const expMap = { day: 1.04, sunset: 1.12, night: 1.18 };
+  const warmMap = { day: 0.02, sunset: 0.14, night: -0.05 };
   renderer.toneMappingExposure = expMap[settings.timeOfDay] || 1.08;
-  updateStadiumEnvMap(settings.timeOfDay);
+  gradePass.uniforms.uWarmth.value = warmMap[settings.timeOfDay] || 0;
+  if (['high', 'ultra', 'cinematic'].includes(settings.quality)) {
+    updateStadiumEnvMap(settings.timeOfDay);
+  }
   world.setEnvironment?.({ timeOfDay: settings.timeOfDay, weather: settings.weather });
   audio.setWeatherAmbience?.(settings.weather);
+  keeper.setWeather?.(settings.weather);
+  shooter.setWeather?.(settings.weather);
 }
 
 function rollWind() {
@@ -1652,6 +1827,8 @@ function startMatch(keepTournamentStage = false) {
   state.targetScore = 0;
   state.targetCombo = 0;
   state.targetShotsLeft = 10;
+  state.shotHistory = [];
+  updateShotMaps();
 
   if (settings.mode === 'tournament') {
     if (!keepTournamentStage) state.tournamentStage = 0;
@@ -1934,6 +2111,7 @@ function executeKick(shot) {
   world.spawnTurfSpray?.(PENALTY_SPOT.clone(), new THREE.Vector3(0, 2.2, -4.5));
   if (shot.power > 0.72 || shot.timedFinish === 'perfect') {
     cameraRig.shake?.(shot.timedFinish === 'perfect' ? 0.38 : 0.22);
+    pulseBroadcastImpact(shot.timedFinish === 'perfect' ? 0.85 : 0.45);
   }
   if (kickInfo && kickInfo.speedKmh) {
     showShotSpeed(kickInfo.speedKmh);
@@ -2055,6 +2233,12 @@ function resolveKick(outcome, info = {}) {
   const isGoal = outcome === 'goal';
   const shotType = state.lockedShot?.shotType || state.aiShotPlan?.shotType || 'normal';
 
+  // UEFA Vuruş Haritası kaydı
+  const shotX = typeof info.x === 'number' ? info.x : ball.position.x;
+  const shotY = typeof info.y === 'number' ? info.y : ball.position.y;
+  state.shotHistory.push({ x: shotX, y: shotY, outcome });
+  updateShotMaps();
+
   // Hedef Vurma özel puanlama
   if (settings.mode === 'targets') {
     if (isGoal) {
@@ -2085,19 +2269,31 @@ function resolveKick(outcome, info = {}) {
             ? 'Harika vuruş!'
             : 'Top ağlarda';
     showBanner('goal', 'GOL!', sub);
+    showCommentary(
+      isPanenka
+        ? 'İNANILMAZ BİR PANENKA! Kaleciyi soğukkanlılıkla ters köşeye yatırdı!'
+        : isTopCorner
+          ? "TAM 90'A ASTI! Örümcek ağlarını aldı, müthiş bir vuruş!"
+          : info.hitPost
+            ? 'DİREKTEN İÇERİ! Top direğe çarpıp ağlarla buluştu!'
+            : 'GOOOOL! Top ağlarla buluştu, tribünler ayakta!'
+    );
     audio.goalCheer();
     audio.pyroPop?.();
     audio.speak?.(isPanenka ? 'panenka' : isTopCorner ? 'topCorner' : 'goal');
     world.setCrowdExcitement(1.0);
     world.triggerGoalEffects?.(new THREE.Vector3(info.x || 0, info.y || 1.2, 0));
     cameraRig.shake?.(isTopCorner ? 0.42 : 0.25);
-    shooter.celebrate(Math.floor(Math.random() * 3));
+    pulseBroadcastImpact(isTopCorner ? 0.9 : 0.6);
+    shooter.celebrate(Math.floor(Math.random() * 4));
     keeper.disappointed();
     state.shouldReplay = true;
   } else if (outcome === 'save') {
     showBanner('save', 'KURTARIŞ!', state.userRole === 'keeper' ? 'Müthiş refleks!' : 'Kaleci izin vermedi');
+    showCommentary('İNANILMAZ KURTARIŞ! Kaleci adeta kalesinde devleşti!');
     audio.speak?.('save');
     cameraRig.shake?.(0.28);
+    pulseBroadcastImpact(0.55);
     if (state.userRole === 'keeper') {
       audio.goalCheer();
       world.setCrowdExcitement(0.95);
@@ -2110,15 +2306,18 @@ function resolveKick(outcome, info = {}) {
     state.shouldReplay = true;
   } else if (outcome === 'post') {
     showBanner('post', 'DİREK!', 'Direkten döndü!');
+    showCommentary('DİREK! İnanılmaz an, top direkten oyun alanına döndü!');
     audio.missGroan();
     audio.speak?.('post');
     cameraRig.shake?.(0.45);
+    pulseBroadcastImpact(0.8);
     world.setCrowdExcitement(0.45);
     shooter.disappointed();
     keeper.celebrate();
     state.shouldReplay = false;
   } else {
     showBanner('miss', 'AUT!', 'Kale dışına gitti');
+    showCommentary('AUT! Top çerçeveyi bulmadı, büyük şans kaçtı!');
     audio.missGroan();
     audio.speak?.('miss');
     world.setCrowdExcitement(0.25);
@@ -2428,6 +2627,12 @@ function finishMatch(icon, title, scoreText, detail, hasNextStage) {
   ui.endTitle.textContent = title;
   ui.endScore.textContent = scoreText;
   ui.endDetail.textContent = detail;
+  if (state.shotHistory.length > 0) {
+    renderShotMapSvg(ui.endShotMapSvg, state.shotHistory);
+    ui.endShotMapWrap.classList.remove('hidden');
+  } else {
+    ui.endShotMapWrap.classList.add('hidden');
+  }
   ui.btnNextStage.classList.toggle('hidden', !hasNextStage);
   ui.btnRematch.classList.toggle('hidden', !online.active);
   ui.btnLeaveOnline.classList.toggle('hidden', !online.active);
@@ -2917,6 +3122,56 @@ ui.btnMute.addEventListener('click', () => {
   updateAudioButtons();
 });
 ui.btnPause.addEventListener('click', () => setPaused(true));
+ui.btnToggleShotMap.addEventListener('click', () => {
+  ui.shotMapMini.classList.toggle('hidden');
+  updateShotMaps();
+});
+ui.btnDropToPotato.addEventListener('click', () => {
+  settings.quality = 'potato';
+  localStorage.setItem(STORAGE_QUALITY, 'potato');
+  applyGraphicsQuality('potato');
+  syncMenuUI();
+  ui.fpsGuard.classList.add('hidden');
+  state.lowFpsSeconds = 0;
+  showToast('🥔 Patates moduna geçildi!', 1.4);
+});
+ui.btnDropToLow.addEventListener('click', () => {
+  settings.quality = 'low';
+  localStorage.setItem(STORAGE_QUALITY, 'low');
+  applyGraphicsQuality('low');
+  syncMenuUI();
+  ui.fpsGuard.classList.add('hidden');
+  state.lowFpsSeconds = 0;
+  showToast('Düşük grafik moduna geçildi!', 1.4);
+});
+ui.btnDismissFps.addEventListener('click', () => {
+  state.fpsGuardDismissed = true;
+  ui.fpsGuard.classList.add('hidden');
+});
+
+// Dokunmatik ŞUT ÇEK butonu
+ui.btnTouchShoot.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  audio.unlock();
+  if (state.paused) return;
+  if (state.phase === 'aim' && state.userRole === 'shooter' && !(online.active && online.picked)) {
+    state.charging = true;
+    state.power = 0.05;
+    state.powerDir = 1;
+  } else if (state.phase === 'runup' && state.userRole === 'shooter') {
+    triggerTimedFinishAttempt();
+  }
+});
+const releaseTouchShoot = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (state.charging && state.phase === 'aim' && state.userRole === 'shooter' && !state.paused) {
+    triggerUserShot();
+  }
+};
+ui.btnTouchShoot.addEventListener('pointerup', releaseTouchShoot);
+ui.btnTouchShoot.addEventListener('pointercancel', releaseTouchShoot);
 ui.btnResume.addEventListener('click', () => setPaused(false));
 ui.btnRestart.addEventListener('click', () => startMatch(settings.mode === 'tournament'));
 ui.btnMenu.addEventListener('click', returnToMenu);
@@ -2983,6 +3238,48 @@ function tick(now) {
     online.emoteTimer -= rawDt;
     if (online.emoteTimer <= 0) ui.emoteFloat.classList.add('hidden');
   }
+  if (state.commentaryTimer > 0) {
+    state.commentaryTimer -= rawDt;
+    if (state.commentaryTimer <= 0) ui.commentaryBar.classList.add('hidden');
+  }
+
+  // Canlı FPS sayacı + Otomatik Düşük FPS Koruması
+  state.fpsAccum += rawDt;
+  state.fpsFrames++;
+  if (state.fpsAccum >= 0.35) {
+    const fps = Math.round(state.fpsFrames / state.fpsAccum);
+    state.fpsValue = fps;
+    ui.fpsBadge.textContent = `${fps} FPS`;
+    ui.fpsBadge.classList.toggle('good', fps >= 48);
+    ui.fpsBadge.classList.toggle('warn', fps >= 28 && fps < 48);
+    ui.fpsBadge.classList.toggle('bad', fps < 28);
+
+    const heavyTier = ['medium', 'high', 'ultra', 'cinematic'].includes(settings.quality);
+    if (!state.paused && state.phase !== 'menu' && heavyTier && !state.fpsGuardDismissed) {
+      if (fps < 28) {
+        state.lowFpsSeconds += state.fpsAccum;
+        if (state.lowFpsSeconds >= 4.0) {
+          ui.fpsGuard.classList.remove('hidden');
+        }
+      } else {
+        state.lowFpsSeconds = Math.max(0, state.lowFpsSeconds - state.fpsAccum * 2);
+      }
+    }
+    state.fpsAccum = 0;
+    state.fpsFrames = 0;
+  }
+
+  // Sinematik shader uniform güncellemesi
+  if (gradePass.enabled) {
+    gradePass.uniforms.uTime.value = now * 0.001;
+    if (gradePass.uniforms.uImpact.value > 0) {
+      gradePass.uniforms.uImpact.value = Math.max(0, gradePass.uniforms.uImpact.value - rawDt * 2.4);
+    }
+  }
+
+  // Dokunmatik ŞUT ÇEK butonu görünürlüğü
+  const showTouchBtn = state.phase === 'aim' && state.userRole === 'shooter' && !(online.active && online.picked);
+  ui.btnTouchShoot.classList.toggle('hidden', !showTouchBtn);
 
   // Online 15s seçim sayacı
   if (online.active && state.phase === 'aim' && online.deadlineMs > 0) {

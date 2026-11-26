@@ -269,18 +269,32 @@ export function createBall(scene, goal) {
   mesh.receiveShadow = true;
   scene.add(mesh);
 
-  // Yerde yumuşak temas gölgesi
-  const shadowGeo = new THREE.CircleGeometry(BALL_RADIUS * 1.35, 20);
+  // Yerde yumuşak radyal temas gölgesi (AO blob — Patates modunda da topu zemine oturtur!)
+  const blobCanvas = document.createElement('canvas');
+  blobCanvas.width = 128;
+  blobCanvas.height = 128;
+  const bctx = blobCanvas.getContext('2d');
+  const grad = bctx.createRadialGradient(64, 64, 8, 64, 64, 60);
+  grad.addColorStop(0, 'rgba(0, 0, 0, 0.72)');
+  grad.addColorStop(0.45, 'rgba(0, 0, 0, 0.34)');
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  bctx.fillStyle = grad;
+  bctx.fillRect(0, 0, 128, 128);
+  const blobTex = new THREE.CanvasTexture(blobCanvas);
+
+  const shadowGeo = new THREE.PlaneGeometry(BALL_RADIUS * 4.4, BALL_RADIUS * 4.4);
   const shadowMat = new THREE.MeshBasicMaterial({
-    color: 0x000000,
+    map: blobTex,
     transparent: true,
-    opacity: 0.35,
+    opacity: 0.75,
     depthWrite: false,
   });
   const groundShadow = new THREE.Mesh(shadowGeo, shadowMat);
   groundShadow.rotation.x = -Math.PI / 2;
-  groundShadow.position.y = 0.012;
+  groundShadow.position.y = 0.015;
   scene.add(groundShadow);
+
+  let trailEnabled = true;
 
   // Hız izi (glowing trail spheres — InstancedMesh = tek draw call!)
   const TRAIL_COUNT = 22;
@@ -350,6 +364,8 @@ export function createBall(scene, goal) {
   const tmpNormal = new THREE.Vector3();
   const tmpAxis = new THREE.Vector3();
   const tmpQuat = new THREE.Quaternion();
+  const tmpPreVel = new THREE.Vector3();
+  const tmpSprayVel = new THREE.Vector3(0, 2.5, 6);
 
   const state = {
     active: false,
@@ -383,13 +399,24 @@ export function createBall(scene, goal) {
     trailMat.opacity = opacity;
   }
 
+  function setGraphicsTier(tier) {
+    const isPotato = tier === 'potato';
+    mesh.castShadow = !isPotato;
+    mesh.receiveShadow = !isPotato;
+    trailEnabled = !isPotato;
+    trailMesh.visible = !isPotato;
+    if (isPotato) clearTrail();
+  }
+
   function syncMesh() {
     mesh.position.copy(pos);
     groundShadow.position.x = pos.x;
     groundShadow.position.z = pos.z;
-    const hFactor = Math.max(0.25, 1 - pos.y * 0.22);
-    groundShadow.scale.setScalar(hFactor);
-    shadowMat.opacity = 0.35 * hFactor;
+    const h = Math.max(0, pos.y - BALL_RADIUS);
+    const scale = 1 + Math.min(1.1, h * 0.28);
+    const fade = Math.max(0.12, 1 / (1 + h * 0.65));
+    groundShadow.scale.setScalar(scale);
+    shadowMat.opacity = 0.78 * fade;
   }
 
   function setReplayPose(p, quat, addTrail = true) {
@@ -799,7 +826,7 @@ export function createBall(scene, goal) {
           const spd = Math.max(8, vel.length());
           if (brickWall) {
             vel.set((pos.x >= 0 ? 1 : -1) * 2.5, Math.max(3.2, Math.abs(vel.y) * 0.5 + 2.2), Math.max(12, spd * 0.82));
-            world?.spawnTurfSpray?.(pos.clone(), new THREE.Vector3(0, 2.5, 6));
+            world?.spawnTurfSpray?.(pos.clone(), tmpSprayVel);
           } else {
             const sideBias = (pos.x >= 0 ? 1 : -1) * 0.4;
             vel.set(sideBias * spd * 0.55, Math.max(2.6, spd * 0.3), Math.max(6.0, spd * 0.52));
@@ -916,7 +943,7 @@ export function createBall(scene, goal) {
       // 4) Kale ağı
       if (state.inGoal && pos.z < -0.02) {
         let touchedNet = false;
-        const preVel = vel.clone();
+        tmpPreVel.copy(vel);
 
         if (pos.z < -(NET_DEPTH - BALL_RADIUS)) {
           pos.z = -(NET_DEPTH - BALL_RADIUS);
@@ -945,7 +972,7 @@ export function createBall(scene, goal) {
 
         if (touchedNet) {
           state.hitNet = true;
-          world?.netImpact?.(pos.clone(), preVel);
+          world?.netImpact?.(pos.clone(), tmpPreVel);
           if (state.netSoundCooldown <= 0) {
             state.netSoundCooldown = 0.2;
             audio?.netHit?.();
@@ -987,10 +1014,12 @@ export function createBall(scene, goal) {
     }
 
     // Hız izi örnekleme
-    trailSampleAccum += dt;
-    if (trailSampleAccum >= 0.012 && speed > 4.5 && !state.settled) {
-      trailSampleAccum = 0;
-      pushTrailPoint(pos);
+    if (trailEnabled) {
+      trailSampleAccum += dt;
+      if (trailSampleAccum >= 0.012 && speed > 4.5 && !state.settled) {
+        trailSampleAccum = 0;
+        pushTrailPoint(pos);
+      }
     }
 
     const outOfArena = pos.z < -8 || pos.z > 24 || Math.abs(pos.x) > 16 || pos.y > 12;
@@ -1011,6 +1040,7 @@ export function createBall(scene, goal) {
     state,
     radius: BALL_RADIUS,
     setSkin,
+    setGraphicsTier,
     setEnvironment,
     setTrailColor,
     setReplayPose,

@@ -894,9 +894,14 @@ function buildStadiumAndCrowd() {
   ];
 
   const spectators = [];
+  const stepTransforms = [];
   const trussTransforms = [];
   const aisleTransforms = [];
   const phoneLights = [];
+  const standDecorGroup = new THREE.Group();
+  const standFlagsGroup = new THREE.Group();
+  group.add(standDecorGroup);
+  group.add(standFlagsGroup);
 
   // Muted, realistic evening stadium crowd palette (no rainbow Lego cubes!)
   const crowdPalette = [
@@ -916,15 +921,18 @@ function buildStadiumAndCrowd() {
     frontWall.position.set(0, 0.9, s.depth / 2);
     standGroup.add(frontWall);
 
-    // Hanging tier banner along front retaining wall
+    // Decorative banner & guardrail (hidden on potato)
+    const decorLocal = new THREE.Group();
+    decorLocal.position.set(s.cx, 0, s.cz);
+    decorLocal.rotation.y = s.rotY;
+
     const banner = new THREE.Mesh(new THREE.PlaneGeometry(s.width - 2, 1.35), tierBannerMat);
     banner.position.set(0, 0.96, s.depth / 2 + 0.43);
-    standGroup.add(banner);
+    decorLocal.add(banner);
 
-    // Sleek guardrail along front edge
     const rail = new THREE.Mesh(new THREE.BoxGeometry(s.width, 0.08, 0.08), railMat);
     rail.position.set(0, 2.05, s.depth / 2 + 0.35);
-    standGroup.add(rail);
+    decorLocal.add(rail);
 
     const stepH = 0.85;
     const stepD = s.depth / s.tiers;
@@ -949,10 +957,16 @@ function buildStadiumAndCrowd() {
     for (let t = 0; t < s.tiers; t++) {
       const y = 1.6 + t * stepH;
       const z = s.depth / 2 - stepD * (t + 0.5);
-      const step = new THREE.Mesh(new THREE.BoxGeometry(s.width, stepH, stepD + 0.1), concreteMat);
-      step.position.set(0, y - stepH / 2, z);
-      step.receiveShadow = true;
-      standGroup.add(step);
+      // Collect instanced step transform (1 draw call for all 44 tiers!)
+      stepTransforms.push({
+        x: s.cx + z * sinR,
+        y: y - stepH / 2,
+        z: s.cz + z * cosR,
+        rotY: s.rotY,
+        w: s.width,
+        h: stepH,
+        d: stepD + 0.1,
+      });
 
       const cols = Math.floor((s.width - 3) / 1.38);
       for (let c = 0; c < cols; c++) {
@@ -965,11 +979,13 @@ function buildStadiumAndCrowd() {
         const lz = z + (Math.random() - 0.5) * 0.2;
         const wx = s.cx + lx * cosR + lz * sinR;
         const wz = s.cz - lx * sinR + lz * cosR;
+        const az = Math.atan2(wz - 22, wx);
 
         spectators.push({
           x: wx,
           y: ly,
           z: wz,
+          az,
           rotY: s.rotY + (Math.random() - 0.5) * 0.25,
           phase: Math.random() * Math.PI * 2,
           freq: 4.8 + Math.random() * 3.2,
@@ -983,6 +999,7 @@ function buildStadiumAndCrowd() {
             x: wx,
             y: ly + 0.85,
             z: wz,
+            az,
             phase: Math.random() * Math.PI * 2,
             speed: 2.2 + Math.random() * 4.0,
           });
@@ -993,12 +1010,12 @@ function buildStadiumAndCrowd() {
     const totalH = 1.8 + s.tiers * stepH + 3.2;
     const backWall = new THREE.Mesh(new THREE.BoxGeometry(s.width, totalH, 0.8), darkMetalMat);
     backWall.position.set(0, totalH / 2, -s.depth / 2 - 0.4);
-    standGroup.add(backWall);
+    decorLocal.add(backWall);
 
     const roof = new THREE.Mesh(new THREE.BoxGeometry(s.width + 2, 0.5, s.depth + 4.5), roofMat);
     roof.position.set(0, totalH + 0.2, 1.2);
     roof.rotation.x = 0.08;
-    standGroup.add(roof);
+    decorLocal.add(roof);
 
     // Crisp bloom-ready stadium roof LED accent strip
     const fascia = new THREE.Mesh(
@@ -1006,7 +1023,9 @@ function buildStadiumAndCrowd() {
       new THREE.MeshBasicMaterial({ color: 0x56ccf2 })
     );
     fascia.position.set(0, totalH - 0.56, s.depth / 2 + 3.0);
-    standGroup.add(fascia);
+    decorLocal.add(fascia);
+
+    standDecorGroup.add(decorLocal);
 
     // Collect roof truss beam transforms (instanced later: 1 draw call total)
     const trussCount = 7;
@@ -1025,10 +1044,24 @@ function buildStadiumAndCrowd() {
     group.add(standGroup);
   }
 
+  // Instanced stand tier steps (1 draw call for all 44 tiers!)
+  const stepGeo = new THREE.BoxGeometry(1, 1, 1);
+  const stepMesh = new THREE.InstancedMesh(stepGeo, concreteMat, stepTransforms.length);
+  const trussDummy = new THREE.Object3D();
+  stepTransforms.forEach((st, idx) => {
+    trussDummy.position.set(st.x, st.y, st.z);
+    trussDummy.rotation.set(0, st.rotY, 0);
+    trussDummy.scale.set(st.w, st.h, st.d);
+    trussDummy.updateMatrix();
+    stepMesh.setMatrixAt(idx, trussDummy.matrix);
+  });
+  stepMesh.instanceMatrix.needsUpdate = true;
+  stepMesh.receiveShadow = true;
+  group.add(stepMesh);
+
   // Instanced roof trusses (1 draw call)
   const trussGeo = new THREE.BoxGeometry(0.42, 0.65, 1);
   const trussMesh = new THREE.InstancedMesh(trussGeo, darkMetalMat, trussTransforms.length);
-  const trussDummy = new THREE.Object3D();
   trussTransforms.forEach((tr, idx) => {
     trussDummy.position.set(tr.x, tr.y, tr.z);
     trussDummy.rotation.set(0.08, tr.rotY, 0);
@@ -1083,7 +1116,7 @@ function buildStadiumAndCrowd() {
     );
     cloth.position.y = 3.1;
     holder.add(cloth);
-    group.add(holder);
+    standFlagsGroup.add(holder);
 
     standFlags.push({
       holder,
@@ -1192,72 +1225,119 @@ function buildStadiumAndCrowd() {
   let crowdTime = 0;
   let currentExcitement = 0.15;
   let targetExcitement = 0.15;
+  let mexicanWaveTimer = 0;
+  let crowdEnabled = true;
+  let phonesEnabled = true;
+  let flagsEnabled = true;
 
   function setExcitement(v) {
-    targetExcitement = Math.max(0, Math.min(1, Number(v) || 0));
+    const nextVal = Math.max(0, Math.min(1, Number(v) || 0));
+    if (nextVal >= 0.72 && targetExcitement < 0.72) {
+      mexicanWaveTimer = 5.5;
+    }
+    targetExcitement = nextVal;
+  }
+
+  function setTier(tier) {
+    const isPotato = tier === 'potato';
+    const isLow = tier === 'low';
+    crowdEnabled = !isPotato;
+    phonesEnabled = !isPotato;
+    flagsEnabled = !isPotato && !isLow;
+
+    bodyMesh.visible = crowdEnabled;
+    headMesh.visible = crowdEnabled;
+    bodyMesh.count = isLow ? Math.floor(count * 0.45) : count;
+    headMesh.count = bodyMesh.count;
+
+    phonePoints.visible = phonesEnabled;
+    standFlagsGroup.visible = flagsEnabled;
+    standDecorGroup.visible = !isPotato;
+    trussMesh.visible = !isPotato && !isLow;
+    aisleMesh.visible = !isPotato;
+    stepMesh.receiveShadow = !isPotato;
   }
 
   function updateCrowd(dt) {
+    if (!crowdEnabled && !phonesEnabled && !flagsEnabled) return;
     const step = Math.min(dt, 0.05);
     crowdTime += step;
     currentExcitement += (targetExcitement - currentExcitement) * Math.min(1, step * 4.5);
+    if (mexicanWaveTimer > 0) mexicanWaveTimer = Math.max(0, mexicanWaveTimer - step);
 
-    const amp = 0.028 + currentExcitement * 0.34;
-    const speedMul = 0.42 + currentExcitement * 1.3;
+    const waveStrength = mexicanWaveTimer > 0 ? Math.min(1, mexicanWaveTimer * 0.8) : 0;
+    const waveHead = crowdTime * 2.6;
 
-    for (let i = 0; i < count; i++) {
-      const sp = spectators[i];
-      const wave = Math.sin(crowdTime * sp.freq * speedMul + sp.phase);
-      const jump = currentExcitement > 0.35
-        ? Math.max(0, wave) * amp
-        : (wave * 0.5 + 0.5) * amp;
+    if (crowdEnabled) {
+      const amp = 0.028 + currentExcitement * 0.34;
+      const speedMul = 0.42 + currentExcitement * 1.3;
+      const activeCount = bodyMesh.count;
 
-      const s = sp.scale;
-      dummy.rotation.set(0, sp.rotY, wave * 0.055 * currentExcitement);
-      dummy.scale.setScalar(s);
+      for (let i = 0; i < activeCount; i++) {
+        const sp = spectators[i];
+        const wave = Math.sin(crowdTime * sp.freq * speedMul + sp.phase);
+        let jump = currentExcitement > 0.35
+          ? Math.max(0, wave) * amp
+          : (wave * 0.5 + 0.5) * amp;
 
-      dummy.position.set(sp.x, sp.y + 0.32 * s + jump, sp.z);
-      dummy.updateMatrix();
-      bodyMesh.setMatrixAt(i, dummy.matrix);
+        // Mexican Wave (Meksika Dalgası) travelling around the stadium perimeter
+        if (waveStrength > 0) {
+          const crest = Math.pow(Math.max(0, Math.cos(sp.az - waveHead)), 6.0);
+          jump += crest * 0.55 * waveStrength;
+        }
 
-      dummy.position.set(sp.x, sp.y + 0.72 * s + jump, sp.z);
-      dummy.updateMatrix();
-      headMesh.setMatrixAt(i, dummy.matrix);
-    }
+        const s = sp.scale;
+        dummy.rotation.set(0, sp.rotY, wave * 0.055 * currentExcitement);
+        dummy.scale.setScalar(s);
 
-    bodyMesh.instanceMatrix.needsUpdate = true;
-    headMesh.instanceMatrix.needsUpdate = true;
+        dummy.position.set(sp.x, sp.y + 0.32 * s + jump, sp.z);
+        dummy.updateMatrix();
+        bodyMesh.setMatrixAt(i, dummy.matrix);
 
-    // Twinkling stadium smartphone / camera lights surge with excitement
-    const twinkleFreq = 1.0 + currentExcitement * 2.6;
-    const minGlow = 0.08 + currentExcitement * 0.35;
-    for (let i = 0; i < phoneCount; i++) {
-      const pl = phoneLights[i];
-      const pulse = Math.pow(0.5 + 0.5 * Math.sin(crowdTime * pl.speed * twinkleFreq + pl.phase), 4.0);
-      const b = Math.min(1.0, minGlow + pulse * (0.65 + currentExcitement * 0.45));
-      phoneColors[i * 3] = b;
-      phoneColors[i * 3 + 1] = b * 0.96;
-      phoneColors[i * 3 + 2] = b * (i % 3 === 0 ? 1.0 : 0.85);
-    }
-    phoneColorAttr.needsUpdate = true;
-
-    // Giant waving supporter flags in North stand
-    const flagWaveSpeed = 3.2 + currentExcitement * 4.5;
-    for (let f = 0; f < standFlags.length; f++) {
-      const sf = standFlags[f];
-      sf.holder.rotation.z = Math.sin(crowdTime * (1.5 + currentExcitement * 2.4) + sf.phase) * (0.14 + currentExcitement * 0.22);
-      const posAttr = sf.clothGeo.attributes.position;
-      const base = sf.basePos;
-      for (let i = 0; i < posAttr.count; i++) {
-        const bx = base[i * 3];
-        const frac = bx / 2.1;
-        posAttr.setZ(i, Math.sin(crowdTime * flagWaveSpeed - bx * 2.6 + sf.phase) * (0.22 + currentExcitement * 0.16) * frac);
+        dummy.position.set(sp.x, sp.y + 0.72 * s + jump, sp.z);
+        dummy.updateMatrix();
+        headMesh.setMatrixAt(i, dummy.matrix);
       }
-      posAttr.needsUpdate = true;
+
+      bodyMesh.instanceMatrix.needsUpdate = true;
+      headMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    if (phonesEnabled) {
+      const twinkleFreq = 1.0 + currentExcitement * 2.6;
+      const minGlow = 0.08 + currentExcitement * 0.35;
+      for (let i = 0; i < phoneCount; i++) {
+        const pl = phoneLights[i];
+        const pulse = Math.pow(0.5 + 0.5 * Math.sin(crowdTime * pl.speed * twinkleFreq + pl.phase), 4.0);
+        const waveBoost = waveStrength > 0
+          ? Math.pow(Math.max(0, Math.cos(pl.az - waveHead)), 5.0) * 0.65 * waveStrength
+          : 0;
+        const b = Math.min(1.0, minGlow + pulse * (0.65 + currentExcitement * 0.45) + waveBoost);
+        phoneColors[i * 3] = b;
+        phoneColors[i * 3 + 1] = b * 0.96;
+        phoneColors[i * 3 + 2] = b * (i % 3 === 0 ? 1.0 : 0.85);
+      }
+      phoneColorAttr.needsUpdate = true;
+    }
+
+    if (flagsEnabled) {
+      const flagWaveSpeed = 3.2 + currentExcitement * 4.5;
+      for (let f = 0; f < standFlags.length; f++) {
+        const sf = standFlags[f];
+        sf.holder.rotation.z = Math.sin(crowdTime * (1.5 + currentExcitement * 2.4) + sf.phase) * (0.14 + currentExcitement * 0.22);
+        const posAttr = sf.clothGeo.attributes.position;
+        const base = sf.basePos;
+        for (let i = 0; i < posAttr.count; i++) {
+          const bx = base[i * 3];
+          const frac = bx / 2.1;
+          posAttr.setZ(i, Math.sin(crowdTime * flagWaveSpeed - bx * 2.6 + sf.phase) * (0.22 + currentExcitement * 0.16) * frac);
+        }
+        posAttr.needsUpdate = true;
+      }
     }
   }
 
-  return { group, setExcitement, updateCrowd, setStadiumScore: jumbotron.draw };
+  return { group, setExcitement, updateCrowd, setStadiumScore: jumbotron.draw, setTier };
 }
 
 function buildFloodlights() {
@@ -1698,25 +1778,40 @@ function buildWeatherSystems() {
   group.add(snowMesh);
 
   let weather = 'clear';
+  let densityScale = 1.0;
   let t = 0;
+
+  function applyVisibility() {
+    const rActive = Math.floor(rainCount * densityScale);
+    const sActive = Math.floor(snowCount * densityScale);
+    rainMesh.count = rActive;
+    snowMesh.count = sActive;
+    rainMesh.visible = weather === 'rain' && rActive > 0;
+    snowMesh.visible = weather === 'snow' && sActive > 0;
+  }
 
   function setWeather(w) {
     weather = w;
-    rainMesh.visible = weather === 'rain';
-    snowMesh.visible = weather === 'snow';
+    applyVisibility();
+  }
+
+  function setDensity(scale) {
+    densityScale = Math.max(0, Math.min(1, Number(scale) || 0));
+    applyVisibility();
   }
 
   function update(dt, windVec) {
-    if (weather === 'clear') return;
+    if (weather === 'clear' || densityScale <= 0) return;
     const step = Math.min(dt, 0.05);
     t += step;
     const wx = windVec ? windVec.x : 0;
     const wz = windVec ? windVec.z : 0;
 
-    if (weather === 'rain') {
+    if (weather === 'rain' && rainMesh.visible) {
+      const activeR = rainMesh.count;
       const tiltZ = -Math.atan2(wx * 1.15, 22);
       const tiltX = Math.atan2(wz * 1.15, 22);
-      for (let i = 0; i < rainCount; i++) {
+      for (let i = 0; i < activeR; i++) {
         const p = rainData[i];
         p.y -= p.speed * step;
         p.x += wx * 1.15 * step;
@@ -1738,8 +1833,9 @@ function buildWeatherSystems() {
         rainMesh.setMatrixAt(i, dummy.matrix);
       }
       rainMesh.instanceMatrix.needsUpdate = true;
-    } else if (weather === 'snow') {
-      for (let i = 0; i < snowCount; i++) {
+    } else if (weather === 'snow' && snowMesh.visible) {
+      const activeS = snowMesh.count;
+      for (let i = 0; i < activeS; i++) {
         const p = snowData[i];
         p.y -= p.speed * step;
         p.x += (wx * 0.65 + Math.sin(t * 1.8 + p.phase) * 0.6) * step;
@@ -1764,7 +1860,212 @@ function buildWeatherSystems() {
     }
   }
 
-  return { group, setWeather, update };
+  return { group, setWeather, setDensity, update };
+}
+
+function buildGrassTufts() {
+  // Crossed tapered grass tuft geometry (2 intersecting triangular blades = 2 triangles)
+  const positions = new Float32Array([
+    -0.024, 0, 0,   0.024, 0, 0,   0, 0.085, 0,
+     0, 0, -0.024,  0, 0, 0.024,   0, 0.085, 0,
+  ]);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshLambertMaterial({
+    color: 0xffffff,
+    side: THREE.DoubleSide,
+  });
+
+  const count = 1400;
+  const mesh = new THREE.InstancedMesh(geo, mat, count);
+  mesh.visible = false; // enabled only on 'ultra' & 'cinematic'
+  mesh.frustumCulled = false;
+
+  const tufts = [];
+  const dummy = new THREE.Object3D();
+  const tmpColor = new THREE.Color();
+  const shades = [0x1f5927, 0x266b2f, 0x2c7a36, 0x1a4d21, 0x31823b];
+
+  for (let i = 0; i < count; i++) {
+    let x, z;
+    if (i < 700) {
+      // Concentrated around penalty spot (0, 0, 11)
+      const angle = Math.random() * Math.PI * 2;
+      const r = 0.28 + Math.sqrt(Math.random()) * 4.4;
+      x = Math.cos(angle) * r;
+      z = 11 + Math.sin(angle) * r;
+    } else {
+      // Concentrated around goal mouth (x in [-6, 6], z in [-1.2, 4.6])
+      x = (Math.random() - 0.5) * 12.2;
+      z = -1.2 + Math.random() * 5.8;
+    }
+    const rotY = Math.random() * Math.PI;
+    const scaleY = 0.72 + Math.random() * 0.65;
+    const scaleXZ = 0.8 + Math.random() * 0.55;
+    const phase = Math.random() * Math.PI * 2;
+    tufts.push({ x, z, rotY, scaleY, scaleXZ, phase });
+
+    tmpColor.setHex(shades[i % shades.length]);
+    mesh.setColorAt(i, tmpColor);
+
+    dummy.position.set(x, 0, z);
+    dummy.rotation.set(0, rotY, 0);
+    dummy.scale.set(scaleXZ, scaleY, scaleXZ);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+
+  let t = 0;
+  function update(dt, windVec) {
+    if (!mesh.visible) return;
+    t += Math.min(dt, 0.05);
+    const wx = windVec ? windVec.x : 0;
+    const wz = windVec ? windVec.z : 0;
+    const windBiasZ = -wx * 0.045;
+    const windBiasX = wz * 0.045;
+    const swayAmp = 0.1 + Math.min(0.22, Math.hypot(wx, wz) * 0.03);
+
+    for (let i = 0; i < count; i++) {
+      const tf = tufts[i];
+      const sway = Math.sin(t * 2.8 + tf.phase + tf.x * 0.45) * swayAmp;
+      dummy.position.set(tf.x, 0, tf.z);
+      dummy.rotation.set(windBiasX + sway * 0.5, tf.rotY, windBiasZ + sway);
+      dummy.scale.set(tf.scaleXZ, tf.scaleY, tf.scaleXZ);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  return { mesh, update };
+}
+
+function createGodRayTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0.0, 'rgba(255, 250, 232, 0.55)');
+  grad.addColorStop(0.35, 'rgba(185, 220, 255, 0.22)');
+  grad.addColorStop(0.8, 'rgba(140, 190, 255, 0.06)');
+  grad.addColorStop(1.0, 'rgba(120, 175, 255, 0.0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 128, 256);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function buildGodRays() {
+  const group = new THREE.Group();
+  group.visible = false; // enabled on 'ultra' & 'cinematic'
+
+  const rayMat = new THREE.MeshBasicMaterial({
+    map: createGodRayTexture(),
+    color: 0xdbeeff,
+    transparent: true,
+    opacity: 0.18,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+
+  const rayGeo = new THREE.ConeGeometry(16, 62, 16, 1, true);
+  rayGeo.translate(0, -31, 0);
+  rayGeo.rotateX(-Math.PI / 2);
+
+  const origins = [
+    { x: -45, y: 34, z: -15, tx: -4, tz: 8 },
+    { x: 45, y: 34, z: -15, tx: 4, tz: 8 },
+    { x: -45, y: 34, z: 66, tx: -4, tz: 14 },
+    { x: 45, y: 34, z: 66, tx: 4, tz: 14 },
+  ];
+
+  for (const o of origins) {
+    const beam = new THREE.Mesh(rayGeo, rayMat);
+    beam.position.set(o.x, o.y, o.z);
+    beam.lookAt(o.tx, 0, o.tz);
+    group.add(beam);
+  }
+
+  return { group, rayMat };
+}
+
+function buildSpiderCam() {
+  const group = new THREE.Group();
+  group.visible = false; // enabled on 'ultra' & 'cinematic'
+
+  const rig = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.45, 0.24, 0.58),
+    new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.35, metalness: 0.7 })
+  );
+  rig.add(body);
+
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.25, metalness: 0.4 })
+  );
+  dome.position.y = -0.18;
+  rig.add(dome);
+
+  const tallyLed = new THREE.Mesh(
+    new THREE.SphereGeometry(0.045, 6, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff2222 })
+  );
+  tallyLed.position.set(0, 0.04, 0.31);
+  rig.add(tallyLed);
+  group.add(rig);
+
+  // 4 thin overhead tension cables to stadium roof corners
+  const anchors = [
+    [-40, 16.5, -11],
+    [40, 16.5, -11],
+    [-40, 16.5, 62],
+    [40, 16.5, 62],
+  ];
+  const cablePositions = new Float32Array(anchors.length * 2 * 3);
+  const cableGeo = new THREE.BufferGeometry();
+  const cableAttr = new THREE.BufferAttribute(cablePositions, 3);
+  cableAttr.setUsage(THREE.DynamicDrawUsage);
+  cableGeo.setAttribute('position', cableAttr);
+  const cables = new THREE.LineSegments(
+    cableGeo,
+    new THREE.LineBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.35 })
+  );
+  cables.frustumCulled = false;
+  group.add(cables);
+
+  let t = 0;
+  function update(dt) {
+    if (!group.visible) return;
+    t += Math.min(dt, 0.05);
+    const cx = Math.sin(t * 0.28) * 9.5;
+    const cy = 11.8 + Math.sin(t * 0.52) * 1.1;
+    const cz = 8.5 + Math.cos(t * 0.21) * 5.2;
+
+    rig.position.set(cx, cy, cz);
+    rig.lookAt(0, 1.2, 5.5);
+
+    for (let i = 0; i < anchors.length; i++) {
+      const a = anchors[i];
+      const idx = i * 6;
+      cablePositions[idx] = a[0];
+      cablePositions[idx + 1] = a[1];
+      cablePositions[idx + 2] = a[2];
+      cablePositions[idx + 3] = cx;
+      cablePositions[idx + 4] = cy + 0.1;
+      cablePositions[idx + 5] = cz;
+    }
+    cableAttr.needsUpdate = true;
+  }
+
+  return { group, update };
 }
 
 function buildParticleEffects() {
@@ -2099,16 +2400,18 @@ export function createWorld(scene) {
 
   const keyLight = new THREE.DirectionalLight(0xfff6e5, 1.55);
   keyLight.position.set(22, 36, 26);
+  keyLight.target.position.set(0, 0, 6);
+  scene.add(keyLight.target);
   keyLight.castShadow = true;
   keyLight.shadow.mapSize.set(2048, 2048);
-  keyLight.shadow.camera.near = 5;
-  keyLight.shadow.camera.far = 95;
-  keyLight.shadow.camera.left = -22;
-  keyLight.shadow.camera.right = 22;
-  keyLight.shadow.camera.top = 24;
-  keyLight.shadow.camera.bottom = -16;
-  keyLight.shadow.bias = -0.0004;
-  keyLight.shadow.normalBias = 0.02;
+  keyLight.shadow.camera.near = 6;
+  keyLight.shadow.camera.far = 85;
+  keyLight.shadow.camera.left = -14;
+  keyLight.shadow.camera.right = 14;
+  keyLight.shadow.camera.top = 18;
+  keyLight.shadow.camera.bottom = -10;
+  keyLight.shadow.bias = -0.00035;
+  keyLight.shadow.normalBias = 0.018;
   scene.add(keyLight);
 
   const fillLight = new THREE.DirectionalLight(0xa3c8ff, 0.6);
@@ -2177,7 +2480,8 @@ export function createWorld(scene) {
   const { group: flagsGroup, flags } = buildCornerFlags();
   scene.add(flagsGroup);
 
-  const { group: stadiumGroup, setExcitement, updateCrowd, setStadiumScore } = buildStadiumAndCrowd();
+  const stadium = buildStadiumAndCrowd();
+  const { group: stadiumGroup, setExcitement, updateCrowd, setStadiumScore } = stadium;
   scene.add(stadiumGroup);
 
   const floodlights = buildFloodlights();
@@ -2195,13 +2499,24 @@ export function createWorld(scene) {
   const effects = buildParticleEffects();
   scene.add(effects.group);
 
+  const grassTufts = buildGrassTufts();
+  scene.add(grassTufts.mesh);
+
+  const godRays = buildGodRays();
+  scene.add(godRays.group);
+
+  const spiderCam = buildSpiderCam();
+  scene.add(spiderCam.group);
+
   const PENALTY_SPOT = new THREE.Vector3(0, 0, 11);
   const windVec = new THREE.Vector3(0, 0, 0);
   let currentTimeOfDay = 'night';
   let currentWeather = 'clear';
+  let currentTier = 'high';
   let baseKeyIntensity = 1.55;
   let baseConeOpacity = 0.07;
   let baseFlareOpacity = 0.78;
+  let baseGodRayOpacity = 0.18;
   let goalFlashTimer = 0;
   let elapsed = 0;
 
@@ -2240,6 +2555,7 @@ export function createWorld(scene) {
       floodlights.glowMat.opacity = 0.06;
       baseFlareOpacity = 0.08;
       baseConeOpacity = 0.0;
+      baseGodRayOpacity = 0.03;
       hazeMat.opacity = 0.02;
     } else if (currentTimeOfDay === 'sunset') {
       const fogColor = currentWeather === 'rain' ? 0x45354a : 0x61394c;
@@ -2263,6 +2579,8 @@ export function createWorld(scene) {
       floodlights.glowMat.opacity = 0.52;
       baseFlareOpacity = 0.62;
       baseConeOpacity = 0.04;
+      baseGodRayOpacity = 0.16;
+      godRays.rayMat.color.setHex(0xffc999);
       hazeMat.color.setHex(0xffb88c);
       hazeMat.opacity = 0.14;
     } else {
@@ -2287,6 +2605,8 @@ export function createWorld(scene) {
       floodlights.glowMat.opacity = 0.76;
       baseFlareOpacity = 0.84;
       baseConeOpacity = 0.075;
+      baseGodRayOpacity = 0.19;
+      godRays.rayMat.color.setHex(0xdbeeff);
       hazeMat.color.setHex(0x9ec5ff);
       hazeMat.opacity = 0.17;
     }
@@ -2294,8 +2614,11 @@ export function createWorld(scene) {
     keyLight.intensity = baseKeyIntensity;
     floodlights.coneMat.opacity = baseConeOpacity;
     floodlights.flareMat.opacity = baseFlareOpacity;
-    const showCones = baseConeOpacity > 0.005;
+    godRays.rayMat.opacity = baseGodRayOpacity;
+    const isPotato = currentTier === 'potato';
+    const showCones = !isPotato && baseConeOpacity > 0.005;
     for (const c of floodlights.cones) c.visible = showCones;
+    godRays.group.visible = (currentTier === 'ultra' || currentTier === 'cinematic') && baseGodRayOpacity > 0.02;
 
     // Weather pitch appearance
     if (currentWeather === 'rain') {
@@ -2324,6 +2647,61 @@ export function createWorld(scene) {
     weatherSys.setWeather(currentWeather);
   }
 
+  function setShadowResolution(size) {
+    const s = Number(size) || 0;
+    if (s <= 0) {
+      keyLight.castShadow = false;
+      return;
+    }
+    keyLight.castShadow = true;
+    const clamped = Math.max(256, Math.min(4096, s));
+    if (keyLight.shadow.mapSize.x !== clamped || keyLight.shadow.mapSize.y !== clamped) {
+      keyLight.shadow.mapSize.set(clamped, clamped);
+      if (keyLight.shadow.map) {
+        keyLight.shadow.map.dispose();
+        keyLight.shadow.map = null;
+      }
+      keyLight.shadow.needsUpdate = true;
+    }
+  }
+
+  function setGraphicsTier(tier) {
+    const valid = ['potato', 'low', 'medium', 'high', 'ultra', 'cinematic'];
+    currentTier = valid.includes(tier) ? tier : 'high';
+    const isPotato = currentTier === 'potato';
+    const isLow = currentTier === 'low';
+    const isUltraPlus = currentTier === 'ultra' || currentTier === 'cinematic';
+
+    stadium.setTier(currentTier);
+
+    // Toggle major groups for ultra-fast potato (<35 draw calls) vs flagship cinematic
+    hazeGroup.visible = !isPotato && !isLow;
+    skyDetails.group.visible = !isPotato;
+    broadcastDetails.group.visible = !isPotato && !isLow;
+    floodlights.group.visible = !isPotato;
+    flagsGroup.visible = !isPotato;
+    apron.visible = !isPotato;
+
+    // Flagship ultra/cinematic visuals
+    grassTufts.mesh.visible = isUltraPlus;
+    godRays.group.visible = isUltraPlus && baseGodRayOpacity > 0.02;
+    spiderCam.group.visible = isUltraPlus;
+
+    // Weather particle density per tier
+    const weatherDensity = isPotato ? 0 : isLow ? 0.35 : currentTier === 'medium' ? 0.75 : 1.0;
+    weatherSys.setDensity(weatherDensity);
+
+    // Shadow flags on pitch & goal
+    pitch.receiveShadow = !isPotato;
+    apron.receiveShadow = !isPotato;
+    goalGroup.traverse((obj) => {
+      if (obj.isMesh) {
+        obj.castShadow = !isPotato;
+        obj.receiveShadow = !isPotato;
+      }
+    });
+  }
+
   function setWind(vec) {
     if (vec && typeof vec.x === 'number') {
       windVec.set(vec.x || 0, vec.y || 0, vec.z || 0);
@@ -2333,13 +2711,17 @@ export function createWorld(scene) {
   }
 
   function triggerGoalEffects(point) {
-    effects.triggerGoal(point);
-    broadcastDetails.triggerFlashBurst();
-    goalFlashTimer = 2.2;
+    if (currentTier !== 'potato') {
+      effects.triggerGoal(point);
+      broadcastDetails.triggerFlashBurst();
+      goalFlashTimer = 2.2;
+    }
   }
 
   function spawnTurfSpray(point, velocity) {
-    effects.spawnSpray(point, velocity, currentWeather);
+    if (currentTier !== 'potato') {
+      effects.spawnSpray(point, velocity, currentWeather);
+    }
   }
 
   function update(dt) {
@@ -2348,33 +2730,37 @@ export function createWorld(scene) {
 
     net.update(safeDt, windVec);
     updateCrowd(safeDt);
-    skyDetails.update(safeDt, windVec);
-    broadcastDetails.update(safeDt);
+    if (skyDetails.group.visible) skyDetails.update(safeDt, windVec);
+    if (broadcastDetails.group.visible) broadcastDetails.update(safeDt);
     weatherSys.update(safeDt, windVec);
     effects.update(safeDt, windVec);
+    if (grassTufts.mesh.visible) grassTufts.update(safeDt, windVec);
+    if (spiderCam.group.visible) spiderCam.update(safeDt);
 
     // Subtle LED ad board scroll
     adTex.offset.x = (adTex.offset.x + safeDt * 0.022) % 1;
     sideTex.offset.x = (sideTex.offset.x + safeDt * 0.022) % 1;
 
     // Corner flags react to wind vector
-    const windSpeed = Math.hypot(windVec.x, windVec.z);
-    const windAngle = windSpeed > 0.2 ? -Math.atan2(windVec.z, windVec.x) : 0.25;
-    const waveFreq = 4.5 + windSpeed * 1.4;
-    const waveAmp = 0.04 + Math.min(0.11, windSpeed * 0.015);
-    for (let f = 0; f < flags.length; f++) {
-      const fl = flags[f];
-      fl.pivot.rotation.y = windAngle + Math.sin(elapsed * 2.1 + f) * 0.1;
-      const posAttr = fl.clothGeo.attributes.position;
-      const base = fl.basePos;
-      for (let i = 0; i < posAttr.count; i++) {
-        const bx = base[i * 3];
-        const by = base[i * 3 + 1];
-        const frac = bx / 0.52;
-        posAttr.setZ(i, Math.sin(elapsed * waveFreq - bx * 11 + f * 1.3) * waveAmp * frac);
-        posAttr.setY(i, by - (1 - Math.min(1, windSpeed / 4)) * 0.06 * frac);
+    if (flagsGroup.visible) {
+      const windSpeed = Math.hypot(windVec.x, windVec.z);
+      const windAngle = windSpeed > 0.2 ? -Math.atan2(windVec.z, windVec.x) : 0.25;
+      const waveFreq = 4.5 + windSpeed * 1.4;
+      const waveAmp = 0.04 + Math.min(0.11, windSpeed * 0.015);
+      for (let f = 0; f < flags.length; f++) {
+        const fl = flags[f];
+        fl.pivot.rotation.y = windAngle + Math.sin(elapsed * 2.1 + f) * 0.1;
+        const posAttr = fl.clothGeo.attributes.position;
+        const base = fl.basePos;
+        for (let i = 0; i < posAttr.count; i++) {
+          const bx = base[i * 3];
+          const by = base[i * 3 + 1];
+          const frac = bx / 0.52;
+          posAttr.setZ(i, Math.sin(elapsed * waveFreq - bx * 11 + f * 1.3) * waveAmp * frac);
+          posAttr.setY(i, by - (1 - Math.min(1, windSpeed / 4)) * 0.06 * frac);
+        }
+        posAttr.needsUpdate = true;
       }
-      posAttr.needsUpdate = true;
     }
 
     // Celebratory floodlight strobe pulse
@@ -2386,10 +2772,14 @@ export function createWorld(scene) {
       if (baseConeOpacity > 0.005) {
         floodlights.coneMat.opacity = baseConeOpacity * (1 + pulse * 1.4);
       }
+      if (godRays.group.visible) {
+        godRays.rayMat.opacity = baseGodRayOpacity * (1 + pulse * 0.85);
+      }
       if (goalFlashTimer === 0) {
         keyLight.intensity = baseKeyIntensity;
         floodlights.flareMat.opacity = baseFlareOpacity;
         floodlights.coneMat.opacity = baseConeOpacity;
+        godRays.rayMat.opacity = baseGodRayOpacity;
       }
     }
   }
@@ -2402,6 +2792,9 @@ export function createWorld(scene) {
     setExcitement(v);
   }
 
+  // Apply default tier ('high') on init
+  setGraphicsTier('high');
+
   return {
     GOAL,
     PENALTY_SPOT,
@@ -2413,5 +2806,7 @@ export function createWorld(scene) {
     triggerGoalEffects,
     spawnTurfSpray,
     setStadiumScore,
+    setGraphicsTier,
+    setShadowResolution,
   };
 }

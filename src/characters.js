@@ -1002,6 +1002,182 @@ function buildHumanoidRig({
   };
 }
 
+function setShadowCasting(obj, enabled) {
+  obj.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = enabled;
+      child.receiveShadow = enabled;
+    }
+  });
+}
+
+// ---- V6 GROUNDED CONTACT SHADOW (AO BLOB) ----
+let _contactShadowTex = null;
+function getContactShadowTexture() {
+  if (_contactShadowTex) return _contactShadowTex;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cx = size * 0.5;
+  const grad = ctx.createRadialGradient(cx, cx, size * 0.04, cx, cx, cx);
+  grad.addColorStop(0.0, 'rgba(0, 0, 0, 0.78)');
+  grad.addColorStop(0.42, 'rgba(0, 0, 0, 0.44)');
+  grad.addColorStop(0.76, 'rgba(0, 0, 0, 0.14)');
+  grad.addColorStop(1.0, 'rgba(0, 0, 0, 0.0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  _contactShadowTex = new THREE.CanvasTexture(canvas);
+  _contactShadowTex.colorSpace = THREE.SRGBColorSpace;
+  return _contactShadowTex;
+}
+
+const CONTACT_SHADOW_GEO = new THREE.CircleGeometry(0.58, 20);
+
+function createContactShadow(scene) {
+  const mat = new THREE.MeshBasicMaterial({
+    map: getContactShadowTexture(),
+    transparent: true,
+    opacity: 0.46,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(CONTACT_SHADOW_GEO, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(0, 0.012, 0);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.renderOrder = 1;
+  if (scene) scene.add(mesh);
+
+  return {
+    mesh,
+    update(x, z, elevation = 0, stretchX = 1, stretchZ = 1, isPotato = false) {
+      mesh.position.set(x, 0.012, z);
+      const elev = Math.max(0, elevation);
+      const baseScale = 1 + elev * 0.28;
+      mesh.scale.set(stretchX * baseScale, stretchZ * baseScale, 1);
+      const baseOpacity = isPotato ? 0.64 : 0.44;
+      mat.opacity = baseOpacity * clamp(1 - elev * 0.48, 0.16, 1);
+    },
+  };
+}
+
+// ---- V6 COLD BREATH VAPOR PUFFS (SNOW WEATHER) ----
+let _breathTex = null;
+function getBreathTexture() {
+  if (_breathTex) return _breathTex;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cx = size * 0.5;
+  const grad = ctx.createRadialGradient(cx, cx, 2, cx, cx, cx);
+  grad.addColorStop(0.0, 'rgba(235, 245, 255, 0.65)');
+  grad.addColorStop(0.45, 'rgba(220, 236, 255, 0.28)');
+  grad.addColorStop(1.0, 'rgba(210, 230, 255, 0.0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  _breathTex = new THREE.CanvasTexture(canvas);
+  _breathTex.colorSpace = THREE.SRGBColorSpace;
+  return _breathTex;
+}
+
+function createColdBreathController(scene, head) {
+  const POOL = 4;
+  const puffs = [];
+  const mouthAnchor = new THREE.Object3D();
+  mouthAnchor.position.set(0, 0.056, 0.14);
+  head.add(mouthAnchor);
+
+  const tmpPos = new THREE.Vector3();
+  const tmpQuat = new THREE.Quaternion();
+  const tmpFwd = new THREE.Vector3();
+
+  for (let i = 0; i < POOL; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: getBreathTexture(),
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.visible = false;
+    if (scene) scene.add(sprite);
+    puffs.push({
+      sprite,
+      mat,
+      age: 99,
+      life: 1.15,
+      vel: new THREE.Vector3(),
+    });
+  }
+
+  let nextIdx = 0;
+  let cooldown = 0.6 + Math.random() * 1.0;
+
+  return {
+    hideAll() {
+      for (let i = 0; i < POOL; i++) {
+        puffs[i].sprite.visible = false;
+        puffs[i].age = 99;
+      }
+    },
+    update(dt, active) {
+      if (!active || !scene) {
+        for (let i = 0; i < POOL; i++) {
+          if (puffs[i].sprite.visible) {
+            puffs[i].sprite.visible = false;
+            puffs[i].age = 99;
+          }
+        }
+        return;
+      }
+
+      cooldown -= dt;
+      if (cooldown <= 0) {
+        cooldown = 2.1 + Math.random() * 1.1;
+        const puff = puffs[nextIdx];
+        nextIdx = (nextIdx + 1) % POOL;
+
+        mouthAnchor.getWorldPosition(tmpPos);
+        head.getWorldQuaternion(tmpQuat);
+        tmpFwd.set(0, 0, 1).applyQuaternion(tmpQuat).normalize();
+
+        puff.sprite.position.copy(tmpPos);
+        puff.sprite.scale.setScalar(0.08);
+        puff.sprite.visible = true;
+        puff.age = 0;
+        puff.life = 1.05 + Math.random() * 0.25;
+        puff.vel.set(
+          tmpFwd.x * 0.28 + (Math.random() - 0.5) * 0.06,
+          0.22 + Math.random() * 0.06,
+          tmpFwd.z * 0.28 + (Math.random() - 0.5) * 0.06
+        );
+      }
+
+      for (let i = 0; i < POOL; i++) {
+        const puff = puffs[i];
+        if (!puff.sprite.visible) continue;
+        puff.age += dt;
+        if (puff.age >= puff.life) {
+          puff.sprite.visible = false;
+          continue;
+        }
+        const t = puff.age / puff.life;
+        puff.sprite.position.addScaledVector(puff.vel, dt);
+        puff.vel.multiplyScalar(Math.exp(-1.4 * dt));
+        const sc = lerp(0.08, 0.34, easeOutQuad(t));
+        puff.sprite.scale.setScalar(sc);
+        const fadeIn = Math.min(1, t / 0.18);
+        const fadeOut = 1 - easeInQuad(Math.max(0, (t - 0.2) / 0.8));
+        puff.mat.opacity = 0.55 * fadeIn * fadeOut;
+      }
+    },
+  };
+}
+
 function resetJoints(rig) {
   rig.hips.position.set(0, rig.HIP_Y, 0);
   rig.hips.rotation.set(0, 0, 0);
@@ -1043,6 +1219,9 @@ export function createKeeper(
 
   const { group } = rig;
   if (scene) scene.add(group);
+  const contactShadow = createContactShadow(scene);
+  const coldBreath = createColdBreathController(scene, rig.head);
+  const tmpShadowPos = new THREE.Vector3();
 
   // ---- COLLIDER ANCHORS ATTACHED TO SKELETON ----
   function makeAnchor(parent, x, y, z, radius) {
@@ -1398,6 +1577,36 @@ export function createKeeper(
     return ev;
   }
 
+  // ---- V6 GRAPHICS TIER & WEATHER ----
+  let graphicsTier = 'high';
+  let weather = 'clear';
+
+  function setGraphicsTier(tier = 'high') {
+    graphicsTier = tier || 'high';
+    const shadowsOn = graphicsTier !== 'potato';
+    setShadowCasting(group, shadowsOn);
+    if (graphicsTier === 'potato' || graphicsTier === 'low') {
+      coldBreath.hideAll();
+    }
+  }
+
+  function setWeather(w = 'clear') {
+    weather = w || 'clear';
+    if (weather !== 'snow') coldBreath.hideAll();
+  }
+
+  function updateContactShadow() {
+    const isPotato = graphicsTier === 'potato';
+    if (state.mode === 'dive' && state.diveDir !== 'center') {
+      // Track diving torso/hips center on the turf with horizontal elongation
+      rig.hips.getWorldPosition(tmpShadowPos);
+      const elev = Math.max(0, tmpShadowPos.y - 0.28);
+      contactShadow.update(tmpShadowPos.x, tmpShadowPos.z, elev, 1.85, 0.92, isPotato);
+    } else {
+      contactShadow.update(group.position.x, group.position.z, group.position.y, 1.05, 1.0, isPotato);
+    }
+  }
+
   function update(dt) {
     const safeDt = Math.min(Math.max(dt || 0, 0), 0.1);
     state.time += safeDt;
@@ -1421,9 +1630,14 @@ export function createKeeper(
     } else if (state.mode === 'disappointed') {
       applyDisappointedPose(state.time);
     }
+
+    updateContactShadow();
+    const breathActive = weather === 'snow' && graphicsTier !== 'potato' && graphicsTier !== 'low';
+    coldBreath.update(safeDt, breathActive);
   }
 
   reset();
+  updateContactShadow();
 
   return {
     group,
@@ -1439,6 +1653,9 @@ export function createKeeper(
     setKit,
     setBallTarget,
     consumeLandEvent,
+    // v6 API
+    setGraphicsTier,
+    setWeather,
   };
 }
 
@@ -1464,6 +1681,8 @@ export function createShooter(
   const { group } = rig;
   group.rotation.y = Math.PI;
   if (scene) scene.add(group);
+  const contactShadow = createContactShadow(scene);
+  const coldBreath = createColdBreathController(scene, rig.head);
 
   const START_POS = new THREE.Vector3(0, 0, 13.5);
   const CONTACT_POS = new THREE.Vector3(-0.20, 0, 11.48);
@@ -1666,6 +1885,70 @@ export function createShooter(
     resetJoints(rig);
     const style = state.celebrateStyle;
 
+    if (style === 3) {
+      // Style 3: Dramatic athletic BACKFLIP + double fist pump!
+      if (t < 0.22) {
+        // Athletic pre-jump crouch & arm back-swing
+        const p = easeOutQuad(t / 0.22);
+        group.position.y = 0;
+        rig.hips.position.y = lerp(rig.HIP_Y, rig.HIP_Y - 0.22, p);
+        rig.torso.rotation.x = 0.34 * p;
+        rig.head.rotation.x = -0.25 * p;
+
+        rig.leftArm.shoulder.rotation.set(0.95 * p, 0, 0.28);
+        rig.rightArm.shoulder.rotation.set(0.95 * p, 0, -0.28);
+        rig.leftArm.elbow.rotation.set(-0.45 * p, 0, 0);
+        rig.rightArm.elbow.rotation.set(-0.45 * p, 0, 0);
+
+        rig.leftLeg.hip.rotation.set(-0.62 * p, 0, 0.12);
+        rig.rightLeg.hip.rotation.set(-0.62 * p, 0, -0.12);
+        rig.leftLeg.knee.rotation.set(1.05 * p, 0, 0);
+        rig.rightLeg.knee.rotation.set(1.05 * p, 0, 0);
+      } else if (t < 0.86) {
+        // Explosive full 360° backward somersault in mid-air!
+        const p = (t - 0.22) / 0.64;
+        const arc = Math.sin(p * Math.PI);
+        const tuck = Math.sin(p * Math.PI);
+        group.position.y = arc * 0.98;
+        rig.hips.position.y = rig.HIP_Y;
+        // Rotate backward around local X (-2*PI = head tilts back, feet whip over top!)
+        rig.hips.rotation.x = -easeInOutCubic(p) * Math.PI * 2;
+        rig.torso.rotation.x = 0.25 * tuck;
+
+        // Tucked knees & hugging arms during peak rotation, opening for landing
+        rig.leftLeg.hip.rotation.set(-1.35 * tuck, 0, 0.12);
+        rig.rightLeg.hip.rotation.set(-1.35 * tuck, 0, -0.12);
+        rig.leftLeg.knee.rotation.set(1.85 * tuck, 0, 0);
+        rig.rightLeg.knee.rotation.set(1.85 * tuck, 0, 0);
+
+        rig.leftArm.shoulder.rotation.set(lerp(-2.2, -0.85, tuck), 0, 0.38);
+        rig.rightArm.shoulder.rotation.set(lerp(-2.2, -0.85, tuck), 0, -0.38);
+        rig.leftArm.elbow.rotation.set(-1.35 * tuck, 0, 0);
+        rig.rightArm.elbow.rotation.set(-1.35 * tuck, 0, 0);
+      } else {
+        // Stick the landing + triumphant double fist pump!
+        const l = clamp((t - 0.86) / 0.24, 0, 1);
+        const absorb = Math.sin(l * Math.PI);
+        const pump = Math.sin((t - 0.86) * 8.5);
+        group.position.y = 0;
+        rig.hips.position.y = rig.HIP_Y - 0.18 * absorb;
+        rig.torso.rotation.x = -0.12 * l + 0.20 * absorb;
+        rig.head.rotation.x = -0.16 * l;
+
+        // Double fist pump overhead!
+        rig.leftArm.shoulder.rotation.set(-2.55 + pump * 0.28, 0, 0.52);
+        rig.rightArm.shoulder.rotation.set(-2.55 - pump * 0.28, 0, -0.52);
+        rig.leftArm.elbow.rotation.set(-0.78 + pump * 0.22, 0, 0);
+        rig.rightArm.elbow.rotation.set(-0.78 - pump * 0.22, 0, 0);
+
+        rig.leftLeg.hip.rotation.set(-0.35 * absorb, 0, 0.20);
+        rig.rightLeg.hip.rotation.set(-0.35 * absorb, 0, -0.20);
+        rig.leftLeg.knee.rotation.set(0.68 * absorb, 0, 0);
+        rig.rightLeg.knee.rotation.set(0.68 * absorb, 0, 0);
+      }
+      return;
+    }
+
     if (style === 1) {
       // Style 1: Iconic Jump-Spin "SIUU" celebration!
       if (t < 0.52) {
@@ -1837,7 +2120,7 @@ export function createShooter(
   function celebrate(style) {
     state.mode = 'celebrate';
     state.time = 0;
-    state.celebrateStyle = style === 1 || style === 2 ? style : 0;
+    state.celebrateStyle = style === 1 || style === 2 || style === 3 ? style : 0;
     state.celebrateStartPos.copy(group.position);
     group.position.y = 0;
     applyCelebratePose(0);
@@ -1852,6 +2135,30 @@ export function createShooter(
 
   function setKit(opts) {
     rig.applyKit(opts);
+  }
+
+  // ---- V6 GRAPHICS TIER & WEATHER ----
+  let graphicsTier = 'high';
+  let weather = 'clear';
+
+  function setGraphicsTier(tier = 'high') {
+    graphicsTier = tier || 'high';
+    const shadowsOn = graphicsTier !== 'potato';
+    setShadowCasting(group, shadowsOn);
+    if (graphicsTier === 'potato' || graphicsTier === 'low') {
+      coldBreath.hideAll();
+    }
+  }
+
+  function setWeather(w = 'clear') {
+    weather = w || 'clear';
+    if (weather !== 'snow') coldBreath.hideAll();
+  }
+
+  function updateContactShadow() {
+    const isPotato = graphicsTier === 'potato';
+    const stretchZ = state.mode === 'celebrate' && state.celebrateStyle === 0 && state.time > 0.45 ? 1.35 : 1.0;
+    contactShadow.update(group.position.x, group.position.z, group.position.y, 1.0, stretchZ, isPotato);
   }
 
   function update(dt) {
@@ -1894,9 +2201,14 @@ export function createShooter(
     } else if (state.mode === 'disappointed') {
       applyDisappointedPose(state.time);
     }
+
+    updateContactShadow();
+    const breathActive = weather === 'snow' && graphicsTier !== 'potato' && graphicsTier !== 'low';
+    coldBreath.update(safeDt, breathActive);
   }
 
   reset();
+  updateContactShadow();
 
   return {
     group,
@@ -1908,5 +2220,8 @@ export function createShooter(
     update,
     // v2 API
     setKit,
+    // v6 API
+    setGraphicsTier,
+    setWeather,
   };
 }

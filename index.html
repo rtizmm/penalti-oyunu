@@ -54,11 +54,18 @@
       </div>
 
       <div id="metaStrip">
+        <div id="fpsBadge" class="meta-pill fps" title="Anlık kare hızı">60 FPS</div>
         <div id="windBadge" class="meta-pill" title="Rüzgar yönü ve hızı">
           <span id="windArrow">→</span> <span id="windText">0 km/s</span>
         </div>
         <div id="netHudPing" class="meta-pill hidden" title="Ağ gecikmesi">🌐 <span id="hudPingVal">--</span> ms</div>
         <div id="speedBadge" class="meta-pill speed hidden">⚡ <span id="speedVal">0</span> km/saat</div>
+      </div>
+
+      <!-- Mini UEFA Vuruş Haritası (toggle) -->
+      <div id="shotMapMini" class="shot-map-card hidden">
+        <div class="sm-head"><span>VURUŞ HARİTASI</span><span id="smCount">0 şut</span></div>
+        <svg id="shotMapMiniSvg" viewBox="-4.4 -0.4 8.8 3.6" class="shot-map-svg"></svg>
       </div>
 
       <!-- Turnuva aşama çubuğu -->
@@ -81,6 +88,7 @@
     <div id="topRight">
       <div id="camButtons" class="cam-buttons"></div>
       <div class="tr-actions">
+        <button id="btnToggleShotMap" class="icon-btn" title="Vuruş Haritası">🗺️</button>
         <button id="btnAnnouncer" class="icon-btn" title="Spiker aç/kapat">🎙️</button>
         <button id="btnMute" class="icon-btn" title="Sesi aç/kapat (M)">🔊</button>
         <button id="btnPause" class="icon-btn" title="Duraklat (Esc)">⏸</button>
@@ -96,6 +104,23 @@
     <div id="slowmo" class="hidden">AĞIR ÇEKİM</div>
     <div id="toast" class="hidden"></div>
     <div id="emoteFloat" class="hidden"></div>
+
+    <!-- Otomatik Düşük FPS Uyarısı -->
+    <div id="fpsGuard" class="hidden">
+      <span>Düşük FPS tespit edildi — 🥔 Patates / Düşük moda geç?</span>
+      <button id="btnDropToPotato" class="fg-btn">🥔 Patates</button>
+      <button id="btnDropToLow" class="fg-btn">Düşük</button>
+      <button id="btnDismissFps" class="fg-close">×</button>
+    </div>
+
+    <!-- TV Spiker Altyazı Bandı (Lower-Third) -->
+    <div id="commentaryBar" class="hidden">
+      <span class="cm-tag">🎙️ CANLI YAYIN</span>
+      <span class="cm-text" id="commentaryText"></span>
+    </div>
+
+    <!-- Dokunmatik cihazlar için ŞUT ÇEK butonu -->
+    <button id="btnTouchShoot" class="touch-shoot hidden">⚽ ŞUT ÇEK<small>(BASILI TUT)</small></button>
 
     <!-- Online hızlı emote çubuğu -->
     <div id="emoteBar" class="hidden">
@@ -242,10 +267,13 @@
               <button data-weather="rain">🌧️ Yağmur</button>
               <button data-weather="snow">❄️ Kar</button>
             </div>
-            <div class="seg mini" id="qualitySeg" title="Grafik Kalitesi">
+            <div class="seg mini quality-seg" id="qualitySeg" title="Grafik Kalitesi">
+              <button data-quality="potato">🥔 Patates</button>
+              <button data-quality="low">Düşük</button>
               <button data-quality="medium">Orta</button>
               <button data-quality="high">Yüksek</button>
               <button data-quality="ultra">✨ Ultra</button>
+              <button data-quality="cinematic">🔥 Sinematik</button>
             </div>
           </div>
         </div>
@@ -374,6 +402,13 @@
       <h2 id="endTitle">KAZANDIN!</h2>
       <div class="end-score" id="endScore">4 - 3</div>
       <div class="end-detail" id="endDetail"></div>
+      <div id="endShotMapWrap" class="shot-map-card end-sm hidden">
+        <div class="sm-head">
+          <span>VURUŞ HARİTASI</span>
+          <span class="sm-legend"><i class="lg g"></i>Gol <i class="lg s"></i>Kurtarış <i class="lg m"></i>Aut/Direk</span>
+        </div>
+        <svg id="endShotMapSvg" viewBox="-4.4 -0.4 8.8 3.6" class="shot-map-svg"></svg>
+      </div>
       <button id="btnNextStage" class="primary hidden">SONRAKİ TUR ▶</button>
       <button id="btnRematch" class="primary hidden">🔄 RÖVANŞ İSTE</button>
       <button id="btnAgain" class="primary">TEKRAR OYNA</button>
